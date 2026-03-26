@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth-middleware"
 
 const sql = neon(process.env.DATABASE_URL!)
 export const dynamic = "force-dynamic"
+export const revalidate = 0;
 
 export async function GET(req: Request) {
   try {

@@ -3,7 +3,7 @@ import { sql } from '@/lib/db'
 import { requireAuth } from "@/lib/auth-middleware"
 
 export const dynamic = "force-dynamic"
-
+export const revalidate = 0;
 // 🔥 SOLO UNA FUNCIÓN GET (unificada con test opcional)
 export async function GET(req: Request) {
   try {
