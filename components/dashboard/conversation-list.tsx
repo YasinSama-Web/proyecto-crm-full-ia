@@ -109,7 +109,7 @@ export function ConversationList({
     },
     staleTime: 0, 
     refetchOnWindowFocus: true, 
-    refetchInterval: 30000, 
+    refetchInterval: 3000, 
   })
 
   // --- SOCKETS Y EVENTOS GLOBALES ---
