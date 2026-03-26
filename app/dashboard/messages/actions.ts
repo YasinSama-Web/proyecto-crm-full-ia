@@ -129,11 +129,13 @@ export async function sendMessage({
     }
 
     // 4. EJECUTAR ENVÍO CON RETRY
+    // 4. EJECUTAR ENVÍO CON RETRY
     try {
         await executeSend(targetLineId);
     } catch (error: any) {
         console.warn("⚠️ Primer intento fallido:", error.message);
 
+        // AQUÍ ESTÁ EL PROBLEMA 👇
         if (error.message.includes("Cliente no listo") || 
             error.message.includes("no autenticado") || 
             error.message.includes("Cliente no inicializado")) {
@@ -149,6 +151,7 @@ export async function sendMessage({
                 return { success: false, error: "Conexión inestable. Intenta de nuevo en unos segundos." }
             }
         } else {
+            // 🚨 ¡ESTA LÍNEA ES LA ASESINA SILENCIOSA! 🚨
             return { success: false, error: "Error enviando: " + error.message }
         }
     }
