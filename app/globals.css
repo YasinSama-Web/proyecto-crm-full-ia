@@ -1,0 +1,225 @@
+@import "tailwindcss";
+
+/* Definición del modo oscuro */
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* --- MODO LIGHT --- */
+  /* Un blanco con un toque muy sutil de azul para que no sea agresivo a la vista */
+  --background: oklch(0.99 0.005 260); 
+  --foreground: oklch(0.13 0.03 260);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.13 0.03 260);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.13 0.03 260);
+
+  /* Primary: Azul Intenso */
+  --primary: oklch(0.55 0.22 260);
+  --primary-foreground: oklch(0.98 0.005 260);
+
+  --secondary: oklch(0.96 0.005 260);
+  --secondary-foreground: oklch(0.13 0.03 260);
+
+  --muted: oklch(0.96 0.005 260);
+  --muted-foreground: oklch(0.45 0.02 260);
+
+  --accent: oklch(0.96 0.005 260);
+  --accent-foreground: oklch(0.13 0.03 260);
+
+  --destructive: oklch(0.58 0.22 29);
+  --destructive-foreground: oklch(0.98 0.005 260);
+
+  --border: oklch(0.92 0.01 260);
+  --input: oklch(0.92 0.01 260);
+  --ring: oklch(0.55 0.22 260);
+
+  /* Gráficos */
+  --chart-1: oklch(0.65 0.18 30);
+  --chart-2: oklch(0.55 0.15 160);
+  --chart-3: oklch(0.40 0.12 260);
+  --chart-4: oklch(0.70 0.15 80);
+  --chart-5: oklch(0.75 0.15 45);
+
+  --radius: 0.625rem;
+
+  /* Sidebar Light */
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.55 0.22 260);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.145 0 0);
+  --sidebar-border: oklch(0.92 0.01 260);
+  --sidebar-ring: oklch(0.55 0.22 260);
+}
+
+.dark {
+  /* --- MODO WHATICKET "AZUL NOCTURNO" --- */
+  
+  /* 🔥 EL COLOR CLAVE: Un azul muy oscuro y elegante (Slate 950+), no negro puro. */
+  /* Hemos subido un poco la saturación (0.04) para que se note azulado */
+  --background: oklch(0.12 0.04 260); 
+  --foreground: oklch(0.98 0.005 260);
+
+  /* Card: Un tono apenas más claro (Slate 900) para generar profundidad sutil sin bordes blancos */
+  --card: oklch(0.14 0.04 260);
+  --card-foreground: oklch(0.98 0.005 260);
+
+  --popover: oklch(0.14 0.04 260);
+  --popover-foreground: oklch(0.98 0.005 260);
+
+  /* Primary: Azul brillante */
+  --primary: oklch(0.60 0.20 260);
+  --primary-foreground: oklch(0.98 0.005 260);
+
+  /* Secondary: Azul grisáceo oscuro */
+  --secondary: oklch(0.20 0.04 260);
+  --secondary-foreground: oklch(0.98 0.005 260);
+
+  --muted: oklch(0.20 0.04 260);
+  --muted-foreground: oklch(0.65 0.02 260);
+
+  --accent: oklch(0.20 0.04 260);
+  --accent-foreground: oklch(0.98 0.005 260);
+
+  --destructive: oklch(0.50 0.20 29);
+  --destructive-foreground: oklch(0.98 0.005 260);
+
+  /* Bordes: Azul oscuro sutil */
+  --border: oklch(0.20 0.04 260);
+  --input: oklch(0.20 0.04 260);
+  --ring: oklch(0.60 0.20 260);
+
+  --chart-1: oklch(0.55 0.22 260);
+  --chart-2: oklch(0.50 0.15 160);
+  --chart-3: oklch(0.75 0.15 35);
+  --chart-4: oklch(0.60 0.18 280);
+  --chart-5: oklch(0.70 0.15 10);
+
+  /* Sidebar Dark: Igual al fondo para inmersión */
+  --sidebar: oklch(0.12 0.04 260);
+  --sidebar-foreground: oklch(0.98 0.005 260);
+  --sidebar-primary: oklch(0.60 0.20 260);
+  --sidebar-primary-foreground: oklch(0.98 0.005 260);
+  --sidebar-accent: oklch(0.20 0.04 260);
+  --sidebar-accent-foreground: oklch(0.98 0.005 260);
+  --sidebar-border: oklch(0.20 0.04 260);
+  --sidebar-ring: oklch(0.60 0.20 260);
+}
+
+@theme inline {
+  --font-sans: 'Geist', 'Geist Fallback';
+  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+  
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Animaciones */
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+  --animate-fadeIn: fadeIn 0.25s ease;
+
+  @keyframes accordion-down {
+    from { height: 0; }
+    to { height: var(--radix-accordion-content-height); }
+  }
+  @keyframes accordion-up {
+    from { height: var(--radix-accordion-content-height); }
+    to { height: 0; }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+@layer base {
+  /* 🔥 ESTO SOLUCIONA EL FONDO BLANCO EN BORDES/HUECOS 🔥 */
+  html, body {
+    height: 100%;
+    width: 100%;
+    background-color: var(--background); /* El body SIEMPRE tendrá el color correcto */
+    color: var(--foreground);
+  }
+
+  * {
+    border-color: var(--border);
+    outline-color: color-mix(in oklab, var(--ring), transparent 50%);
+  }
+}
+
+@layer utilities {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
+  }
+  .dark * {
+    scrollbar-color: rgba(100, 116, 139, 0.4) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: rgba(148, 163, 184, 0.3);
+    border-radius: 20px;
+  }
+  .dark ::-webkit-scrollbar-thumb {
+    background-color: rgba(100, 116, 139, 0.4);
+  }
+}
+
+[data-sileo-container],
+.sileo-container,
+[class*="sileo"],
+[role="alert"][class*="toast"] {
+  z-index: 9999 !important;
+  position: fixed !important;
+}
+
+/* Asegurar que el modal quede por debajo si es necesario */
+[data-sileo-toast],
+.sileo-toast {
+  z-index: 9999 !important;
+}
