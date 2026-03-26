@@ -339,7 +339,8 @@ export function ChatView({ conversation, onToggleDetails, showDetails, onToggleS
     },
     enabled: !!conversation?.id,
     staleTime: 0, 
-    refetchOnWindowFocus: true 
+    refetchOnWindowFocus: true ,
+    refetchInterval: 1000
   });
 
   const showLoader = isChangingChat || (isLoadingMessages && conversation?.id === displayedConversationId);

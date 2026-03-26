@@ -4,7 +4,8 @@ import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth-middleware"
 import { sql } from "@/lib/db"
 
-const SERVER_URL = process.env.CRM_URL || process.env.WHATSAPP_SERVER_URL || process.env.NEXT_PUBLIC_WHATSAPP_SERVER_URL || ""
+// 🔥 ELIMINAMOS process.env.CRM_URL de la lista
+const SERVER_URL = process.env.WHATSAPP_SERVER_URL || process.env.NEXT_PUBLIC_WHATSAPP_SERVER_URL || "";
 const API_SECRET = process.env.SECRET || process.env.WHATSAPP_SERVER_SECRET || process.env.WHATSAPP_SECRET || ""
 
 export async function POST(request: Request) {
