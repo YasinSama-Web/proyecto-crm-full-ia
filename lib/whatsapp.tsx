@@ -2,12 +2,9 @@
 
 import { sql } from "./db"
 
-const WHATSAPP_SERVER_URL = process.env.WHATSAPP_SERVER_URL
-  ? process.env.WHATSAPP_SERVER_URL.startsWith("http")
-    ? process.env.WHATSAPP_SERVER_URL
-    : `https://${process.env.WHATSAPP_SERVER_URL}`
-  : ""
-const WHATSAPP_SERVER_SECRET = process.env.WHATSAPP_SERVER_SECRET || ""
+const RAW_URL = process.env.WHATSAPP_SERVER_URL || process.env.NEXT_PUBLIC_WHATSAPP_SERVER_URL || ""
+const WHATSAPP_SERVER_URL = RAW_URL.startsWith("http") ? RAW_URL : (RAW_URL ? `https://${RAW_URL}` : "")
+const WHATSAPP_SERVER_SECRET = process.env.WHATSAPP_SERVER_SECRET || process.env.SECRET || ""
 
 interface WhatsAppServerResponse {
   success: boolean
@@ -24,7 +21,8 @@ async function callWhatsAppServer(
   body?: object,
 ): Promise<WhatsAppServerResponse> {
   if (!WHATSAPP_SERVER_URL) {
-    return { success: false, error: "WHATSAPP_SERVER_URL not configured" }
+    console.error("🚨 ERROR FATAL: URL de Railway no configurada en Vercel");
+    return { success: false, error: "Falta configurar la URL del servidor de WhatsApp" }
   }
 
   const url = `${WHATSAPP_SERVER_URL}${endpoint}`
