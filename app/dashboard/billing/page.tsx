@@ -4,10 +4,11 @@ import Swal from "sweetalert2"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { motion, AnimatePresence } from "framer-motion"
-import { getMyBillingHistory } from "./actions"
+import { getMyBillingHistory, getMyAddons } from "./actions"
 import { 
-  Check, X, Zap, Gift, Sparkles, Rocket, Crown, Loader2, 
-  CreditCard, Receipt, PackagePlus, Users, MessageCircle, Bot, BrainCircuit, Smartphone, ChevronDown, Plus, Minus, ArrowRight
+  Check, X, Zap, Gift, Sparkles, Rocket, Crown, Loader2, AlertCircle,
+  CreditCard, Receipt, PackagePlus, Users, MessageCircle, Bot, BrainCircuit, Smartphone, ChevronDown, Plus, Minus, ArrowRight,
+  Mic, FileText, Shirt, Stethoscope
 } from "lucide-react"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
@@ -97,6 +98,12 @@ const addonsMonthly = [
   { id: "EXTRA_AI_BOT", key: "ia_bots_extra", name: "Bot Jefe Total (IA)", desc: "+1 Bot Inteligente adicional", price: 1, icon: Sparkles, color: "text-purple-500", bg: "bg-purple-100", requiresPlan: "ENTERPRISE" },
 ]
 
+const addonsVip = [
+  { id: "VIP_VOICE", key: "addon_voice_clone", name: "Clonación de Voz", desc: "La IA responderá con notas de voz ultra-realistas.", price: 5, icon: Mic, color: "text-violet-500", bg: "bg-violet-100", requiresPlan: "ENTERPRISE" },
+  { id: "VIP_PDF", key: "addon_pdf_quotes", name: "Presupuestos en PDF", desc: "Maqueta y envía presupuestos formales al cliente.", price: 3, icon: FileText, color: "text-slate-500", bg: "bg-slate-200", requiresPlan: "ENTERPRISE" },
+  { id: "VIP_MAGIC", key: "addon_magic_fitting", name: "Probador Mágico", desc: "La IA coloca tu ropa en la foto del cliente.", price: 8, icon: Shirt, color: "text-pink-500", bg: "bg-pink-100", requiresPlan: "ENTERPRISE" },
+  { id: "VIP_MEDICAL", key: "addon_prescription_reader", name: "Lector de Recetas", desc: "Descifra recetas manuscritas médicas.", price: 4, icon: Stethoscope, color: "text-emerald-500", bg: "bg-emerald-100", requiresPlan: "ENTERPRISE" },
+]
 function GlassCard({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <div className={`relative bg-card/60 dark:bg-slate-800/60 backdrop-blur-xl rounded-3xl border border-border/50 dark:border-slate-700/50 shadow-xl overflow-hidden ${className}`}>
@@ -123,7 +130,6 @@ function BillingToggle({ isAnnual, onToggle }: { isAnnual: boolean; onToggle: ()
   )
 }
 
-// 🔥 SUBCOMPONENTE PARA EVITAR EL ERROR DE HOOKS
 function AddonOneOffCard({ addon, onBuy, processingId }: { addon: typeof addonsOneOff[0], onBuy: (addonId: string, optionId: string, price: number) => void, processingId: string | null }) {
   const [selectedOptId, setSelectedOptId] = useState(() => {
     const defaultOpt = addon.options.find(o => (o as any).popular) || addon.options[0];
@@ -167,6 +173,7 @@ export default function BillingPage() {
   const [isAnnual, setIsAnnual] = useState(false)
   const [processingId, setProcessingId] = useState<string | null>(null)
   const [billingHistory, setBillingHistory] = useState<any[]>([])
+  const [myAddonsList, setMyAddonsList] = useState<any[]>([])
   
   const [userData, setUserData] = useState({
     plan: "TRIAL",
@@ -176,14 +183,22 @@ export default function BillingPage() {
     agentes_extra: 0,
     lineas_extra: 0,
     bots_extra: 0,
-    ia_bots_extra: 0
+    ia_bots_extra: 0,
+    addon_voice_clone: false,
+    addon_pdf_quotes: false,
+    addon_magic_fitting: false,
+    addon_prescription_reader: false
   })
 
   const [monthlyCart, setMonthlyCart] = useState<Record<string, number>>({
     EXTRA_AGENT: 0,
     EXTRA_LINE: 0,
     EXTRA_BOT: 0,
-    EXTRA_AI_BOT: 0
+    EXTRA_AI_BOT: 0,
+    VIP_VOICE: 0,
+    VIP_PDF: 0,
+    VIP_MAGIC: 0,
+    VIP_MEDICAL: 0
   })
 
   useEffect(() => {
@@ -205,10 +220,15 @@ export default function BillingPage() {
             agentes_extra: data.user.agentes_extra || 0,
             lineas_extra: data.user.lineas_extra || 0,
             bots_extra: data.user.bots_extra || 0,
-            ia_bots_extra: data.user.ia_bots_extra || 0
+            ia_bots_extra: data.user.ia_bots_extra || 0,
+            addon_voice_clone: !!data.user.addon_voice_clone,
+            addon_pdf_quotes: !!data.user.addon_pdf_quotes,
+            addon_magic_fitting: !!data.user.addon_magic_fitting,
+            addon_prescription_reader: !!data.user.addon_prescription_reader
           })
         }
         getMyBillingHistory().then(history => setBillingHistory(history));
+        getMyAddons().then(addons => setMyAddonsList(addons));
       })
       .catch(console.error)
       .finally(() => setIsLoading(false))
@@ -441,22 +461,31 @@ export default function BillingPage() {
 
   // --- CÁLCULOS EN VIVO PARA EL CARRITO ---
   const cartItemsCount = Object.values(monthlyCart).reduce((a, b) => a + b, 0);
-  const cartTotalCost = addonsMonthly.reduce((total, addon) => total + (monthlyCart[addon.id] * addon.price), 0);
+  
+  const monthlyCost = addonsMonthly.reduce((total, addon) => total + (monthlyCart[addon.id] * addon.price), 0);
+  const vipCost = addonsVip.reduce((total, addon) => total + (monthlyCart[addon.id] * addon.price), 0);
+  const cartTotalCost = monthlyCost + vipCost;
   
   const currentPlanObj = plans.find(p => p.backendId === userData.plan);
   const basePlanPrice = currentPlanObj ? currentPlanObj.price.monthly : 0;
+  
   const currentExtrasCost = 
-    (userData.agentes_extra * 1) + 
-    (userData.lineas_extra * 1) + 
-    (userData.bots_extra * 1) + 
-    (userData.ia_bots_extra * 1);
+    (userData.agentes_extra * addonsMonthly.find(a => a.id === "EXTRA_AGENT")!.price) + 
+    (userData.lineas_extra * addonsMonthly.find(a => a.id === "EXTRA_LINE")!.price) + 
+    (userData.bots_extra * addonsMonthly.find(a => a.id === "EXTRA_BOT")!.price) + 
+    (userData.ia_bots_extra * addonsMonthly.find(a => a.id === "EXTRA_AI_BOT")!.price) +
+    (userData.addon_voice_clone ? addonsVip.find(a => a.id === "VIP_VOICE")!.price : 0) +
+    (userData.addon_pdf_quotes ? addonsVip.find(a => a.id === "VIP_PDF")!.price : 0) +
+    (userData.addon_magic_fitting ? addonsVip.find(a => a.id === "VIP_MAGIC")!.price : 0) +
+    (userData.addon_prescription_reader ? addonsVip.find(a => a.id === "VIP_MEDICAL")!.price : 0);
+    
   const currentMonthlyTotal = basePlanPrice + currentExtrasCost;
 
   return (
     <div className="space-y-8 pb-24 max-w-7xl mx-auto px-4">
       
       {/* HEADER Y TABS */}
-      <div className="text-center space-y-6">
+      <div className="text-center space-y-6 mt-8">
         <h1 className="text-3xl font-bold tracking-tight flex items-center justify-center gap-3">
           <div className="p-2.5 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/30">
             <CreditCard className="h-6 w-6 text-white" />
@@ -509,12 +538,28 @@ export default function BillingPage() {
                    <h4 className="text-sm font-bold text-foreground mb-4 uppercase tracking-wider">Complementos Adicionales Activos</h4>
                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                       {userData.agentes_extra > 0 && <div className="bg-background p-3 rounded-xl border border-border shadow-sm text-center"><Users className="w-5 h-5 mx-auto text-emerald-500 mb-2"/><p className="font-bold">{userData.agentes_extra}</p><p className="text-xs text-muted-foreground">Agentes Extra</p></div>}
-                      {userData.lineas_extra > 0 && <div className="bg-background p-3 rounded-xl border border-border shadow-sm text-center"><Smartphone className="w-5 h-5 mx-auto text-amber-500 mb-2"/><p className="font-bold">{userData.lineas_extra}</p><p className="text-xs text-muted-foreground">Líneas Extra</p></div>}
+                      {userData.lineas_extra > 0 && <div className="bg-background p-3 rounded-xl border border-border shadow-sm text-center"><Smartphone className="w-5 h-5 mx-auto text-amber-500 mb-2"/><p className="font-bold">{userData.lineas_extra}</p><p className="text-xs text-muted-foreground">Conexiones Extra</p></div>}
                       {userData.bots_extra > 0 && <div className="bg-background p-3 rounded-xl border border-border shadow-sm text-center"><Bot className="w-5 h-5 mx-auto text-slate-500 mb-2"/><p className="font-bold">{userData.bots_extra}</p><p className="text-xs text-muted-foreground">Bots Flujo</p></div>}
                       {userData.ia_bots_extra > 0 && <div className="bg-background p-3 rounded-xl border border-border shadow-sm text-center"><Sparkles className="w-5 h-5 mx-auto text-purple-500 mb-2"/><p className="font-bold">{userData.ia_bots_extra}</p><p className="text-xs text-muted-foreground">Bots IA (Jefe)</p></div>}
+                      
+                      {/* 🔥 AÑADIMOS LOS VIPs PARA QUE NO SE VEA VACÍO */}
+                      {userData.addon_voice_clone && <div className="bg-background p-3 rounded-xl border border-border shadow-sm text-center flex flex-col justify-between"><Mic className="w-5 h-5 mx-auto text-violet-500 mb-1"/><p className="font-bold text-xs">Clonación Voz</p><Badge className="text-[9px] px-1.5 mt-1 bg-violet-100 text-violet-700 border-0 mx-auto w-fit">VIP</Badge></div>}
+                      {userData.addon_pdf_quotes && <div className="bg-background p-3 rounded-xl border border-border shadow-sm text-center flex flex-col justify-between"><FileText className="w-5 h-5 mx-auto text-slate-500 mb-1"/><p className="font-bold text-xs">Presupuestos PDF</p><Badge className="text-[9px] px-1.5 mt-1 bg-violet-100 text-violet-700 border-0 mx-auto w-fit">VIP</Badge></div>}
+                      {userData.addon_magic_fitting && <div className="bg-background p-3 rounded-xl border border-border shadow-sm text-center flex flex-col justify-between"><Shirt className="w-5 h-5 mx-auto text-pink-500 mb-1"/><p className="font-bold text-xs">Probador Mágico</p><Badge className="text-[9px] px-1.5 mt-1 bg-violet-100 text-violet-700 border-0 mx-auto w-fit">VIP</Badge></div>}
+                      {userData.addon_prescription_reader && <div className="bg-background p-3 rounded-xl border border-border shadow-sm text-center flex flex-col justify-between"><Stethoscope className="w-5 h-5 mx-auto text-emerald-500 mb-1"/><p className="font-bold text-xs">Lector Recetas</p><Badge className="text-[9px] px-1.5 mt-1 bg-violet-100 text-violet-700 border-0 mx-auto w-fit">VIP</Badge></div>}
                    </div>
                 </div>
               )}
+              
+              {/* BOTÓN DE CANCELAR PLAN BASE */}
+              <div className="flex justify-end mt-4 px-2 mb-4 mr-2">
+                <button 
+                  onClick={handleCancelSubscription}
+                  className="text-sm font-medium text-muted-foreground hover:text-red-500 transition-colors flex items-center gap-1.5"
+                >
+                  <X className="w-4 h-4" /> Cancelar suscripción
+                </button>
+              </div>
             </GlassCard>
           )}
 
@@ -588,6 +633,96 @@ export default function BillingPage() {
           ========================================= */}
       {activeTab === "ADDONS" && (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="relative pb-20">
+          
+          {/* INVENTARIO DE ADDONS COMPRADOS */}
+          {myAddonsList.length > 0 && (
+            <div className="mb-12 max-w-4xl mx-auto">
+              <h3 className="text-xl font-bold mb-4 flex items-center gap-2 text-foreground">
+                <PackagePlus className="w-6 h-6 text-emerald-500" /> Mis Complementos Activos
+              </h3>
+              
+              <div className="grid md:grid-cols-2 gap-4">
+                {myAddonsList.map(addon => {
+                  let Icon = Check;
+                  if (addon.id === "EXTRA_AGENT") Icon = Users;
+                  if (addon.id === "EXTRA_LINE") Icon = Smartphone;
+                  if (addon.id === "EXTRA_BOT") Icon = Bot;
+                  if (addon.id === "EXTRA_AI_BOT") Icon = Sparkles;
+                  if (addon.id === "VIP_VOICE") Icon = Mic;
+                  if (addon.id === "VIP_PDF") Icon = FileText;
+                  if (addon.id === "VIP_MAGIC") Icon = Shirt;
+                  if (addon.id === "VIP_MEDICAL") Icon = Stethoscope;
+
+                  const periodEnd = addon.current_period_end ? new Date(addon.current_period_end) : null;
+                  const isLocked = periodEnd ? new Date() < periodEnd : false;
+                  const formattedDate = periodEnd ? format(periodEnd, "d 'de' MMMM", { locale: es }) : "próxima factura";
+
+                  return (
+                    <GlassCard key={addon.id} className={`p-4 flex items-center justify-between border-l-4 ${addon.isVip ? 'border-l-violet-500' : 'border-l-emerald-500'}`}>
+                      <div className="flex items-center gap-4">
+                        <div className={`p-2.5 rounded-xl ${addon.isVip ? 'bg-violet-100 text-violet-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                          <Icon className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className="font-bold text-foreground flex items-center gap-2">
+                            {addon.quantity > 1 ? `${addon.quantity}x ` : ''}{addon.name}
+                            {addon.isVip && <Badge className="bg-violet-500 text-white text-[9px] px-1 border-0">VIP</Badge>}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-0.5">Renueva el {formattedDate}</p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-col items-end">
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          disabled={isLocked}
+                          className={`h-8 text-xs ${isLocked ? 'text-slate-400 bg-slate-100 dark:bg-slate-800' : 'text-red-500 hover:text-red-600 hover:bg-red-50'}`}
+                          onClick={() => {
+                            if (isLocked) return;
+                            Swal.fire({
+                              title: '¿Programar baja?',
+                              html: `
+                                <div class="text-sm text-slate-600 text-left space-y-3">
+                                  <p>Estás por dar de baja <b>${addon.quantity > 1 ? addon.quantity + 'x ' : ''}${addon.name}</b>.</p>
+                                  <div class="bg-amber-50 border border-amber-200 p-3 rounded-lg">
+                                    <p class="text-amber-800 text-xs leading-relaxed">
+                                      <b>Aviso de facturación:</b> Como la mejora ya fue habilitada en tu cuenta, este complemento se incluirá en tu próxima factura de Mercado Pago.<br><br>
+                                      La baja se hará efectiva al finalizar tu ciclo, y a partir del mes siguiente ya no se te cobrará.
+                                    </p>
+                                  </div>
+                                </div>
+                              `,
+                              icon: 'warning',
+                              showCancelButton: true,
+                              confirmButtonText: 'Sí, programar baja',
+                              cancelButtonText: 'Mantener activo',
+                              confirmButtonColor: '#ef4444'
+                            }).then((res) => {
+                               if(res.isConfirmed) {
+                                  // Llamada a tu API para bajar la suscripción en MP y restar el addon en la BD
+                                  Swal.fire("Programado", "Baja solicitada correctamente.", "success");
+                               }
+                            })
+                          }}
+                        >
+                          {isLocked ? "Bloqueado" : "Dar de baja"}
+                        </Button>
+                        {isLocked && <span className="text-[9px] text-slate-400 mt-1 cursor-help" title={`Por seguridad, podrás cancelar este complemento a partir del ${formattedDate}.`}>Disponible el {formattedDate}</span>}
+                      </div>
+                    </GlassCard>
+                  )
+                })}
+              </div>
+              
+              <div className="w-full h-px bg-border/60 my-10 relative">
+                 <div className="absolute left-1/2 -translate-x-1/2 -top-3 bg-background px-4 text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                    Catálogo de Complementos
+                 </div>
+              </div>
+            </div>
+          )}
+
            <div className="mb-8 text-center max-w-2xl mx-auto">
               <h2 className="text-2xl font-bold text-foreground">Potencia tu CRM a medida</h2>
               <p className="text-muted-foreground mt-2">Los packs de créditos se abonan al instante. Los agentes, líneas y bots se sumarán a tu facturación mensual.</p>
@@ -595,7 +730,7 @@ export default function BillingPage() {
            
            <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5 lg:gap-6">
               
-              {/* RENDERIZAR PACKS DE PAGO ÚNICO (Con Subcomponente para evitar error de hooks) */}
+              {/* RENDERIZAR PACKS DE PAGO ÚNICO */}
               {addonsOneOff.map((addon) => (
                  <AddonOneOffCard 
                     key={addon.id} 
@@ -605,7 +740,7 @@ export default function BillingPage() {
                  />
               ))}
 
-              {/* RENDERIZAR ADDONS MENSUALES (Con Contador + y -) */}
+              {/* RENDERIZAR ADDONS MENSUALES (Con Contador) */}
               {addonsMonthly.map((addon) => {
                 const isLocked = addon.requiresPlan && addon.requiresPlan !== userData.plan;
                 const qty = monthlyCart[addon.id] || 0;
@@ -613,20 +748,22 @@ export default function BillingPage() {
                 return (
                   <div key={addon.id} className={`bg-card p-5 rounded-2xl border ${qty > 0 ? 'border-emerald-500 ring-1 ring-emerald-500/30 shadow-emerald-500/10' : 'border-border'} shadow-sm flex flex-col relative transition-all`}>
                      {isLocked && (
-                        <div className="absolute inset-0 bg-background/80 backdrop-blur-[2px] z-10 flex flex-col items-center justify-center p-4 text-center rounded-2xl">
+                        <div className="absolute inset-0 bg-background/80 backdrop-blur-[2px] z-9 flex flex-col items-center justify-center p-4 text-center rounded-2xl">
                            <div className="bg-slate-800 p-2.5 rounded-full mb-3 shadow-lg"><Crown className="w-6 h-6 text-amber-400" /></div>
                            <p className="font-bold text-base text-foreground">Exclusivo Scale</p>
                            <Button variant="link" onClick={() => setActiveTab("PLAN")} className="text-emerald-600 text-xs mt-1">Mejorar Plan</Button>
+                            <div className="absolute -top-3 right-4 z-20">
+                        <Badge className="bg-violet-600 text-white border-0 shadow-sm"><Sparkles className="w-3 h-3 mr-1"/> Funcionalidad VIP</Badge>
+                     </div>
                         </div>
+                        
                      )}
+                     
                      <div className="flex items-start gap-4 mb-4">
                         <div className={`p-3 rounded-xl ${addon.bg} ${addon.color}`}><addon.icon className="w-6 h-6" /></div>
                         <div>
                            <h4 className="font-bold text-base leading-tight">{addon.name}</h4>
                            <p className="text-xs text-muted-foreground mt-1">{addon.desc}</p>
-                           <Badge variant="outline" className="mt-2 text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20">
-         Extras activos: {(userData as any)[addon.key]}
-      </Badge>
                         </div>
                      </div>
                      <div className="mt-auto pt-4 flex items-center justify-between border-t border-border/50">
@@ -641,13 +778,62 @@ export default function BillingPage() {
                   </div>
                 )
               })}
+
+              {/* RENDERIZAR ADDONS VIP (Booleanos) */}
+              {addonsVip.map((addon) => {
+                const isOwned = (userData as any)[addon.key] === true;
+                const isInCart = monthlyCart[addon.id] > 0;
+                
+                // 🔥 LÓGICA DE BLOQUEO DE PLAN
+                const isLocked = addon.requiresPlan && addon.requiresPlan !== userData.plan;
+
+                return (
+                  <div key={addon.id} className={`bg-card p-5 rounded-2xl border ${isInCart ? 'border-violet-500 ring-1 ring-violet-500/30 shadow-violet-500/10' : 'border-border'} shadow-sm flex flex-col relative transition-all`}>
+                     {/* BARRERA DE BLOQUEO VISUAL */}
+                     {isLocked && !isOwned && (
+                        <div className="absolute inset-0 bg-background/80 backdrop-blur-[2px] z-9 flex flex-col items-center justify-center p-4 text-center rounded-2xl">
+                           <div className="bg-slate-800 p-2.5 rounded-full mb-3 shadow-lg"><Crown className="w-6 h-6 text-amber-400" /></div>
+                           <p className="font-bold text-base text-foreground">Exclusivo Scale</p>
+                           <Button variant="link" onClick={() => setActiveTab("PLAN")} className="text-emerald-600 text-xs mt-1">Mejorar Plan</Button>
+                        </div>
+                     )}
+                     
+                     <div className="absolute -top-3 right-4 z-20">
+                        <Badge className="bg-violet-600 text-white border-0 shadow-sm"><Sparkles className="w-3 h-3 mr-1"/> Funcionalidad VIP</Badge>
+                     </div>
+                     <div className="flex items-start gap-4 mb-4 mt-2">
+                        <div className={`p-3 rounded-xl ${addon.bg} ${addon.color}`}><addon.icon className="w-6 h-6" /></div>
+                        <div>
+                           <h4 className="font-bold text-base leading-tight">{addon.name}</h4>
+                           <p className="text-xs text-muted-foreground mt-1">{addon.desc}</p>
+                        </div>
+                     </div>
+                     <div className="mt-auto pt-4 flex items-center justify-between border-t border-border/50">
+                        <div><span className="text-xl font-black">${addon.price.toLocaleString()}</span><span className="text-xs text-muted-foreground ml-1">/mes</span></div>
+                        
+                        {isOwned ? (
+                           <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-200">Ya lo tienes</Badge>
+                        ) : isInCart ? (
+                           <Button size="sm" variant="secondary" className="bg-violet-100 text-violet-700 hover:bg-violet-200" onClick={() => setMonthlyCart({...monthlyCart, [addon.id]: 0})}>
+                             <Check className="w-4 h-4 mr-1"/> Añadido
+                           </Button>
+                        ) : (
+                           <Button size="sm" variant="outline" className="border-border hover:border-violet-500 hover:text-violet-600" onClick={() => setMonthlyCart({...monthlyCart, [addon.id]: 1})}>
+                             <Plus className="w-4 h-4 mr-1"/> Añadir
+                           </Button>
+                        )}
+                     </div>
+                  </div>
+                )
+              })}
+
            </div>
 
            {/* 🔥 CARRITO FLOTANTE INFERIOR */}
            <AnimatePresence>
              {cartItemsCount > 0 && (
                <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }} className="fixed bottom-6 left-0 right-0 z-50 flex justify-center px-4">
-                  <div className="bg-slate-900 dark:bg-slate-800 text-white rounded-2xl shadow-2xl shadow-slate-900/20 p-4 md:p-6 w-full max-w-4xl flex flex-col md:flex-row items-center justify-between gap-6 border border-slate-700">
+                 <div className="bg-slate-900 dark:bg-slate-800 text-white rounded-2xl shadow-2xl shadow-slate-900/20 p-4 md:p-6 w-full max-w-4xl flex flex-col md:flex-row items-center justify-between gap-6 border border-slate-700">
                      <div className="flex-1 w-full">
                         <div className="flex items-center gap-2 mb-2">
                            <Sparkles className="w-5 h-5 text-emerald-400" />
@@ -658,6 +844,12 @@ export default function BillingPage() {
                            {addonsMonthly.map(addon => {
                               if (monthlyCart[addon.id] > 0) {
                                  return <Badge key={addon.id} className="bg-slate-800 text-emerald-300 border-slate-700 font-medium">+{monthlyCart[addon.id]} {addon.name}</Badge>
+                              }
+                              return null;
+                           })}
+                           {addonsVip.map(addon => {
+                              if (monthlyCart[addon.id] > 0) {
+                                 return <Badge key={addon.id} className="bg-slate-800 text-violet-300 border-slate-700 font-medium">+1 {addon.name} (VIP)</Badge>
                               }
                               return null;
                            })}
@@ -677,7 +869,7 @@ export default function BillingPage() {
                            Actualizar Contrato
                         </Button>
                      </div>
-                  </div>
+                 </div>
                </motion.div>
              )}
            </AnimatePresence>

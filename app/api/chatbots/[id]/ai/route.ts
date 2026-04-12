@@ -7,7 +7,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const user = await requireAuth(request)
     const { id } = await params
 
-    // 🔥 Agregamos todas las nuevas columnas al SELECT
+    // 🔥 Agregamos TODAS las nuevas columnas al SELECT
     const result = await sql`
       SELECT 
         ai_mode, 
@@ -22,8 +22,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         ai_transcribe_audio,
         ai_jefe_total,
         ai_auto_receipt,
-        ai_datos_bancarios
-        
+        ai_datos_bancarios,
+        ai_auto_profiler,
+        ai_realtime_translator,
+        ai_voice_cloning,
+        ai_pdf_generator,
+        ai_magic_fitting,
+        ai_ocr_reader,
+        ai_magic_fitting_catalog,
+        ai_realtime_translator,
+        ai_pdf_logo,
+        ai_ecommerce_mode
       FROM chatbots 
       WHERE id = ${id} AND usuario_id = ${user.rootOwnerId} 
     `
@@ -55,7 +64,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       ai_transcribe_audio,
       ai_jefe_total,
       ai_auto_receipt,
-      ai_datos_bancarios
+      ai_datos_bancarios,
+      ai_auto_profiler,
+      ai_realtime_translator,
+      ai_voice_cloning,
+      ai_pdf_generator,
+      ai_magic_fitting,
+      ai_ocr_reader,
+      ai_magic_fitting_catalog,
+      ai_pdf_logo,
+      ai_ecommerce_mode
     } = body
 
     // 🔥 Actualizamos la base de datos con los nuevos valores
@@ -74,11 +92,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         ai_transcribe_audio = ${ai_transcribe_audio},
         ai_jefe_total = ${ai_jefe_total},
         ai_auto_receipt = ${ai_auto_receipt},
-        ai_datos_bancarios = ${ai_datos_bancarios}
+        ai_datos_bancarios = ${ai_datos_bancarios},
+        ai_auto_profiler = ${ai_auto_profiler},
+        ai_realtime_translator = ${ai_realtime_translator},
+        ai_voice_cloning = ${ai_voice_cloning},
+        ai_pdf_generator = ${ai_pdf_generator},
+        ai_magic_fitting = ${ai_magic_fitting},
+        ai_ocr_reader = ${ai_ocr_reader},
+        ai_magic_fitting_catalog = ${ai_magic_fitting_catalog},
+        ai_pdf_logo = ${ai_pdf_logo},
+        ai_ecommerce_mode =${ai_ecommerce_mode}
+
       WHERE id = ${id} AND usuario_id = ${user.rootOwnerId}
       RETURNING *
     `
-    // Nota: Usé RETURNING * para que devuelva todo actualizado y el código quede más limpio.
 
     if (result.length === 0) return NextResponse.json({ error: "Chatbot no encontrado" }, { status: 404 })
 

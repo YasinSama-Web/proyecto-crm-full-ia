@@ -26,6 +26,11 @@ export interface EnrichedUser {
   mensajes_extra?: number
   ia_credits?: number // 🔥 NUEVO: Agregamos a la interfaz
   ia_bots_extra?: number
+  addon_voice_clone?: boolean 
+  addon_pdf_quotes?: boolean 
+  addon_magic_fitting?: boolean 
+  addon_prescription_reader?: boolean 
+  addon_addon_ecommerce?: boolean 
   permissions: {
     tier: string
     features: Record<string, boolean>
@@ -106,7 +111,8 @@ export async function getEnrichedUser(userId: number): Promise<EnrichedUser | nu
     // 🔥 NUEVO: Agregamos ia_credits al SELECT de SQL
     const result = await sql`
       SELECT id, nombre, email, role, owner_id, subscription_status, permissions, fecha_creacion,
-             plan, ia_bots_extra, billing_cycle, plan_expires_at, trial_ends_at, mensajes_plan, mensajes_extra, ia_credits
+             plan, ia_bots_extra, billing_cycle, plan_expires_at, trial_ends_at, mensajes_plan, mensajes_extra, ia_credits,
+             addon_voice_clone, addon_pdf_quotes, addon_magic_fitting, addon_prescription_reader, addon_ecommerce
       FROM usuarios
       WHERE id = ${userId}
     `
@@ -177,7 +183,12 @@ export async function getEnrichedUser(userId: number): Promise<EnrichedUser | nu
       mensajes_plan: user.mensajes_plan,   
       mensajes_extra: user.mensajes_extra,
       ia_credits: user.ia_credits || 0, // 🔥 NUEVO: Lo pasamos al objeto final
-      ia_bots_extra: user.ia_bots_extra || 0
+      ia_bots_extra: user.ia_bots_extra || 0,
+      addon_voice_clone: user.addon_voice_clone || false,
+      addon_pdf_quotes: user.addon_pdf_quotes || false,
+      addon_magic_fitting: user.addon_magic_fitting || false,
+      addon_prescription_reader: user.addon_prescription_reader || false,
+      addon_ecommerce: user.addon_ecommerce || false,
     }
   } catch (error) {
     console.error("Error getting enriched user:", error)

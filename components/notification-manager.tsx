@@ -6,7 +6,6 @@ import { useNotifications } from "@/contexts/notification-context"
 import { usePathname, useRouter } from "next/navigation"
 import { useSettings } from "@/hooks/use-settings"
 import { MessageCircle } from "lucide-react" 
-// 🔥 1. Importamos la función toast de sileo y eliminamos SweetAlert
 import { sileo } from 'sileo'
 
 export function NotificationManager() {
@@ -23,8 +22,6 @@ export function NotificationManager() {
       .then(data => {
         if (data?.user?.id) {
             setCurrentUserId(String(data.user.id))
-            
-            // Apenas sabemos quién eres, vamos a buscar lo que te perdiste
             fetchOfflineNotifications()
         }
       })
@@ -71,8 +68,6 @@ export function NotificationManager() {
     } catch (e) {}
   }
 
-  // 🔥 2. Eliminamos todo el bloque de "const Toast = Swal.mixin({...})" porque Sileo lo hace solo
-
   const formatToastContent = (msg: any) => {
     if (!msg) return "Nuevo mensaje recibido";
     const content = msg.content || "";
@@ -93,10 +88,10 @@ export function NotificationManager() {
       if (!data.message) return
       if (String(data.usuario_id) !== String(currentUserId)) return;
 
-      // 🔥 1. DETECCIÓN DE PAGO (Punto Verde)
       const isPayment = data.unreadIaPayment === true;
+      // 🔥 DETECTAMOS SI ES EL BOTÓN DE PÁNICO
+      const isFurious = typeof data.message.content === 'string' && data.message.content.includes('ALERTA DE SISTEMA');
 
-      // Solo notificamos si es entrante o si es un pago (el bot autocompletó el cobro)
       if (data.message.is_incoming === false && !isPayment) return
 
       addNotification({
@@ -104,7 +99,8 @@ export function NotificationManager() {
         contactName: data.contactName || data.contactPhone,
         message: data.message,
         timestamp: new Date().toISOString(),
-        isPayment: isPayment // Le pasamos la bandera al contexto
+        isPayment: isPayment,
+        isFurious: isFurious // 🔥 Lo pasamos al contexto
       })
 
       playSound()
@@ -113,7 +109,7 @@ export function NotificationManager() {
       const nombre = data.contactName || data.contactPhone || 'Desconocido'
       const initial = nombre.charAt(0).toUpperCase()
 
-      // 🔥 2. SI ES UN PAGO (Notificación VIP Verde)
+      // 🔥 2A. SI ES UN PAGO (Verde)
       if (isPayment) {
           const AvatarIcon = (
             <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-[11px] font-bold text-white shadow-sm ring-2 ring-emerald-900">
@@ -122,31 +118,34 @@ export function NotificationManager() {
           )
 
           sileo.success({
-            title: (
-               <span className="flex items-center gap-1.5 text-sm font-bold text-emerald-400">
-                 ¡Venta IA Confirmada!
-               </span>
-            ),
+            title: <span className="flex items-center gap-1.5 text-sm font-bold text-emerald-400">¡Venta IA Confirmada!</span>,
             icon: AvatarIcon,
-            description: (
-               <div className="flex flex-col gap-1 mt-1">
-                 <span className="text-xs text-emerald-100/90 font-medium">
-                   La IA acaba de cobrarle a {nombre}. Por favor, audita el chat.
-                 </span>
-               </div>
-            ),
+            description: <div className="flex flex-col gap-1 mt-1"><span className="text-xs text-emerald-100/90 font-medium">La IA acaba de cobrarle a {nombre}. Por favor, audita el chat.</span></div>,
             className: "!bg-slate-900/95 !backdrop-blur-md !border-emerald-500/30 !shadow-[0_0_30px_rgba(16,185,129,0.2)]",
-            button: {
-              title: "Auditar Pago",
-              onClick: () => {
-                 router.push(`/dashboard/messages?id=${data.conversationId}`)
-              },
-            },
+            button: { title: "Auditar Pago", onClick: () => router.push(`/dashboard/messages?id=${data.conversationId}`) },
           })
-          return; // Salimos para no mostrar la notificación normal abajo
+          return; 
       }
 
-      // 🔥 3. SI ES UN MENSAJE NORMAL (Notificación Estándar)
+      // 🔥 2B. SI ES UN CLIENTE FURIOSO (Rojo/Naranja)
+      if (isFurious) {
+        const AvatarIcon = (
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-red-600 text-[11px] font-bold text-white shadow-sm ring-2 ring-red-900">
+            <span className="animate-pulse text-xs">🚨</span>
+          </div>
+        )
+
+        sileo.error({
+          title: <span className="flex items-center gap-1.5 text-sm font-bold text-red-400">¡Atención Requerida!</span>,
+          icon: AvatarIcon,
+          description: <div className="flex flex-col gap-1 mt-1"><span className="text-xs text-red-100/90 font-medium">{nombre} solicitó un agente o está molesto.</span></div>,
+          className: "!bg-slate-900/95 !backdrop-blur-md !border-red-500/50 !shadow-[0_0_30px_rgba(239,68,68,0.3)]",
+          button: { title: "Rescatar Chat", onClick: () => router.push(`/dashboard/messages?id=${data.conversationId}`) },
+        })
+        return; 
+      }
+
+      // 🔥 3. SI ES UN MENSAJE NORMAL (Azul)
       const AvatarIcon = (
         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-500 text-[11px] font-bold text-white shadow-sm ring-2 ring-slate-800">
           {initial}
@@ -154,26 +153,11 @@ export function NotificationManager() {
       )
 
       sileo.action({
-        title: (
-           <span className="flex items-center gap-1.5 text-sm font-semibold text-white">
-             Nuevo mensaje de {nombre}
-           </span>
-        ),
+        title: <span className="flex items-center gap-1.5 text-sm font-semibold text-white">Nuevo mensaje de {nombre}</span>,
         icon: AvatarIcon,
-        description: (
-           <div className="flex flex-col gap-1 mt-1">
-             <span className="text-xs text-slate-300 line-clamp-2 leading-relaxed font-medium">
-               "{cleanText}"
-             </span>
-           </div>
-        ),
+        description: <div className="flex flex-col gap-1 mt-1"><span className="text-xs text-slate-300 line-clamp-2 leading-relaxed font-medium">"{cleanText}"</span></div>,
         className: "!bg-slate-900/95 !backdrop-blur-md !border-slate-800 !shadow-2xl",
-        button: {
-          title: "Ir al chat",
-          onClick: () => {
-             router.push(`/dashboard/messages?id=${data.conversationId}`)
-          },
-        },
+        button: { title: "Ir al chat", onClick: () => router.push(`/dashboard/messages?id=${data.conversationId}`) },
       })
     }
 

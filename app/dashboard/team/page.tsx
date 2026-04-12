@@ -17,7 +17,7 @@ export default async function TeamPage() {
 
   const ownerId = user.rootOwnerId
 
-  // 🔥 1. Traemos la info del Dueño (Saldo de IA, Plan y Extras de Equipo)
+  // 1. Traemos la info del Dueño
   const ownerData = await sql`
     SELECT ia_credits, ia_credits_extra, plan, agentes_extra 
     FROM usuarios 
@@ -27,14 +27,14 @@ export default async function TeamPage() {
   const ownerRecord = ownerData[0] || {}
   const ownerCredits = Number(ownerRecord.ia_credits || 0) + Number(ownerRecord.ia_credits_extra || 0)
   
-  // 🔥 MATEMÁTICA DE LÍMITES PARA AGENTES
+  // MATEMÁTICA DE LÍMITES
   const plan = (ownerRecord.plan || "STARTER").toUpperCase()
   const agentesExtra = ownerRecord.agentes_extra || 0
   const baseAgents = plan === 'ENTERPRISE' ? 9999 : plan === 'PRO' ? 8 : 1
   const limit = baseAgents + agentesExtra
 
-  // 🔥 2. Traemos a los agentes, líneas y analíticas
-  const [agents, lines, analyticsQuery] = await Promise.all([
+  // 🔥 2. TRAEMOS AGENTES, WHATSAPP, OMNICHANNELS Y ANALÍTICAS
+  const [agents, waLines, omniLines, analyticsQuery] = await Promise.all([
     sql`
       SELECT 
         u.id, u.nombre, u.email, u.fecha_creacion, u.role, 
@@ -44,12 +44,14 @@ export default async function TeamPage() {
       WHERE u.owner_id = ${ownerId} AND u.role = 'AGENT' AND u.id != ${ownerId}
       ORDER BY u.fecha_creacion DESC
     `,
-    sql`SELECT id, nombre, phone, status FROM lineas_whatsapp WHERE "userId" = ${ownerId} AND status = 'CONECTADA'`,
+    // WhatsApp original
+    sql`SELECT id, nombre, phone as identifier, status FROM lineas_whatsapp WHERE "userId" = ${ownerId} AND status = 'CONECTADA'`,
+    // Omnichannels nuevos
+    sql`SELECT id, name as nombre, platform as identifier, status, platform FROM omni_channels WHERE "userId" = ${ownerId} AND status = 'ACTIVE'`,
     
     sql`
       SELECT 
-        u.id as user_id,
-        u.nombre as agente,
+        u.id as user_id, u.nombre as agente,
         (SELECT COUNT(*)::int FROM conversaciones c WHERE c.usuario_id = u.id) as leads,
         (SELECT COUNT(*)::int FROM ventas v WHERE v.usuario_id = u.id) as ventas,
         COALESCE((SELECT SUM(amount) FROM ventas v WHERE v.usuario_id = u.id), 0)::float as facturado,
@@ -75,7 +77,7 @@ export default async function TeamPage() {
     else if (row.ventas > 0) efectividad = 100;
 
     return {
-      name: row.agente, // 👈 Cambiado a 'name' para que el gráfico (Recharts) lo lea bien
+      name: row.agente,
       leads: row.leads,
       ventas: row.ventas,
       facturado: row.facturado,
@@ -85,16 +87,20 @@ export default async function TeamPage() {
     }
   })
 
+  // 🔥 3. UNIFICAMOS TODOS LOS CANALES PARA EL FRONTEND
+  const unifiedChannels = [
+    ...waLines.map(l => ({ ...l, platform: 'whatsapp' })),
+    ...omniLines
+  ];
+
   return (
     <div className="p-6">
       <TeamManagement 
         agents={agents as any} 
         ownerId={ownerId} 
-        whatsappLines={lines as any} 
+        channels={unifiedChannels as any} 
         ownerCredits={ownerCredits}
         realSalesData={realAnalyticsData} 
-        
-        // 🔥 NUEVOS PROPS
         usedAgents={used}
         limitAgents={limit}
         isLimitReached={isLimitReached}

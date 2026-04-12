@@ -15,19 +15,19 @@ export async function sendMessage({
   lineId,
   contactPhone,
   mobileId,
-  quotedMessageId,      // 🔥 Nuevos campos
-  quotedParticipant,    // 🔥
-  quotedContent,         // 🔥
+  quotedMessageId,
+  quotedParticipant,
+  quotedContent,
 }: { 
   conversationId: string
   body: string
-  type?: "texto" | "image" | "audio" 
+  type?: "texto" | "image" | "audio" | "document"
   lineId?: string
   contactPhone?: string
   mobileId?: string
-  quotedMessageId?: string | null     // 🔥
-  quotedParticipant?: string | null   // 🔥
-  quotedContent?: string | null       // 🔥
+  quotedMessageId?: string | null
+  quotedParticipant?: string | null
+  quotedContent?: string | null
 }) {
   const user = await requireAuth()
   
@@ -47,68 +47,102 @@ export async function sendMessage({
     const conv = conversation[0]
     
     let targetLineId = conv.lineId || conv.lineid || lineId
-    const targetPhone = conv.contact_phone || contactPhone
+    let targetPhone = conv.contact_phone || contactPhone
 
     if (!targetPhone) {
         return { success: false, error: "Faltan datos de contacto" }
     }
 
-    // 2. LÓGICA DE MIGRACIÓN
-    const isLineDead = !targetLineId || conv.line_archived === true || conv.line_status === 'DESCONECTADA';
+    // 🚦 2. EL DETECTOR OMNICANAL
+    const channel = conv.channel || "whatsapp";
+    const omni_channel_id = conv.omni_channel_id;
 
-    if (isLineDead) {
-        console.log(`⚠️ Línea actual (${targetLineId}) no válida. Buscando reemplazo activo...`);
-        
-        const activeLines = await sql`
-            SELECT id FROM lineas_whatsapp 
-            WHERE "userId" = ${user.rootOwnerId} 
-            AND status = 'CONECTADA' 
-            AND (is_archived = false OR is_archived IS NULL)
-            LIMIT 1
-        `;
-
-        if (activeLines.length === 0) {
-            return { success: false, error: "No tienes ninguna línea conectada para responder." }
-        }
-
-        const newLineId = activeLines[0].id;
-        console.log(`🔀 Migrando conversación de ${targetLineId} a ${newLineId}`);
-        
-        targetLineId = newLineId;
-
-        await sql`
-            UPDATE conversaciones 
-            SET "lineId" = ${newLineId} 
-            WHERE id = ${conversationId}
-        `;
+    if (channel === 'whatsapp') {
+        targetPhone = targetPhone.replace(/\D/g, "");
     }
 
-    // 3. DEFINIR FUNCIÓN DE ENVÍO
-    const executeSend = async (currentLineId: string) => {
-        const whatsappServerUrl = process.env.WHATSAPP_SERVER_URL
-        const whatsappSecret = process.env.WHATSAPP_SECRET
+    // 3. LÓGICA DE MIGRACIÓN (¡SOLO SI ES WHATSAPP!)
+    if (channel === 'whatsapp') {
+        const isLineDead = !targetLineId || conv.line_archived === true || conv.line_status === 'DESCONECTADA';
+
+        if (isLineDead) {
+            console.log(`⚠️ Línea actual (${targetLineId}) no válida. Buscando reemplazo activo...`);
+            
+            const activeLines = await sql`
+                SELECT id FROM lineas_whatsapp 
+                WHERE "userId" = ${user.rootOwnerId} 
+                AND status = 'CONECTADA' 
+                AND (is_archived = false OR is_archived IS NULL)
+                LIMIT 1
+            `;
+
+            if (activeLines.length === 0) {
+                return { success: false, error: "No tienes ninguna línea conectada para responder." }
+            }
+
+            const newLineId = activeLines[0].id;
+            targetLineId = newLineId;
+
+            await sql`
+                UPDATE conversaciones 
+                SET "lineId" = ${newLineId} 
+                WHERE id = ${conversationId}
+            `;
+        }
+    }
+
+    // 🔥 4. GUARDAR MENSAJE EN BASE DE DATOS LOCAL PRIMERO (Para evitar el error de Prisma en Railway)
+    const finalMessageId = mobileId || randomUUID();
+    
+    await sql`UPDATE conversaciones SET bot_enabled = false WHERE id = ${conversationId}`;
+
+    if (type !== "audio") {
+       const dbType = (type === "image") ? "image" : (type === "document") ? "document" : "texto";
+
+        await sql`
+          INSERT INTO mensajes (
+            id, conversation_id, content, type, is_incoming, 
+            timestamp, usuario_id, media_url, status,
+            quoted_message_id, quoted_participant, quoted_content
+          )
+          VALUES (
+            ${finalMessageId}, ${conversationId}, ${body}, ${dbType}, false, 
+            NOW(), ${user.id}, ${type === "image" ? body : null}, 'sent',
+            ${quotedMessageId || null}, ${quotedParticipant || null}, ${quotedContent || null}
+          )
+        `
+    }
+    
+    await sql`UPDATE conversaciones SET last_activity = NOW() WHERE id = ${conversationId}`
+
+    // 5. DEFINIR FUNCIÓN DE ENVÍO A RAILWAY
+    const executeSend = async (currentLineId: string | null) => {
+       const whatsappServerUrl = process.env.WHATSAPP_SERVER_URL || process.env.NEXT_PUBLIC_WHATSAPP_SERVER_URL;
+        const whatsappSecret = process.env.WHATSAPP_SECRET || process.env.SECRET;
         
         if (!whatsappServerUrl) throw new Error("WhatsApp server no configurado");
 
         let mappedType = "text";
         if (type === "image") mappedType = "image";
         if (type === "audio") mappedType = "audio";
+        if (type === "document") mappedType = "document"
 
         const payload = {
             lineId: currentLineId,     
             contactPhone: targetPhone, 
             content: body,
-            messageId: mobileId,
+            messageId: finalMessageId, // 🔥 Le pasamos el ID que acabamos de crear en BD
             type: mappedType,
             userId: user.id,
             saveToDb: type === "audio" ? true : false, 
             jid: currentLineId, 
             to: targetPhone,
             message: body,
-            // 🔥 Pasamos los datos de la cita a Baileys
             quotedMessageId: quotedMessageId || null,
             quotedParticipant: quotedParticipant || null,
-            quotedContent: quotedContent || null
+            quotedContent: quotedContent || null,
+            channel: channel,
+            omni_channel_id: omni_channel_id
         }
 
         const response = await fetch(`${whatsappServerUrl}/api/send-message`, {
@@ -128,14 +162,12 @@ export async function sendMessage({
         return response.json();
     }
 
-    // 4. EJECUTAR ENVÍO CON RETRY
-    // 4. EJECUTAR ENVÍO CON RETRY
+    // 6. EJECUTAR ENVÍO A RAILWAY DESPUÉS DE GUARDAR
     try {
         await executeSend(targetLineId);
     } catch (error: any) {
         console.warn("⚠️ Primer intento fallido:", error.message);
 
-        // AQUÍ ESTÁ EL PROBLEMA 👇
         if (error.message.includes("Cliente no listo") || 
             error.message.includes("no autenticado") || 
             error.message.includes("Cliente no inicializado")) {
@@ -143,7 +175,6 @@ export async function sendMessage({
             console.log("⏳ Esperando 4 segundos para reintento automático...");
             await delay(4000); 
 
-            console.log("🔁 Reintentando envío...");
             try {
                 await executeSend(targetLineId);
             } catch (retryError: any) {
@@ -151,39 +182,9 @@ export async function sendMessage({
                 return { success: false, error: "Conexión inestable. Intenta de nuevo en unos segundos." }
             }
         } else {
-            // 🚨 ¡ESTA LÍNEA ES LA ASESINA SILENCIOSA! 🚨
             return { success: false, error: "Error enviando: " + error.message }
         }
     }
-    
-    // 5. GUARDAR MENSAJE EN BASE DE DATOS LOCAL
-    const finalMessageId = mobileId || randomUUID();
-    
-    // Si es audio, Baileys ya lo guardó. Si es texto/imagen, lo guardamos aquí.
-    if (type !== "audio") {
-        const dbType = type === "image" ? "image" : "texto"
-
-        // 🔥 Agregamos los campos 'quoted' al INSERT
-        await sql`
-          INSERT INTO mensajes (
-            id, conversation_id, content, type, is_incoming, 
-            timestamp, usuario_id, media_url, status,
-            quoted_message_id, quoted_participant, quoted_content
-          )
-          VALUES (
-            ${finalMessageId}, ${conversationId}, ${body}, ${dbType}, false, 
-            NOW(), ${user.id}, ${type === "image" ? body : null}, 'sent',
-            ${quotedMessageId || null}, ${quotedParticipant || null}, ${quotedContent || null}
-          )
-        `
-    }
-    
-    // 6. Actualizar última actividad
-    await sql`
-      UPDATE conversaciones 
-      SET last_activity = NOW()
-      WHERE id = ${conversationId}
-    `
     
     revalidatePath("/dashboard/messages")
     return { success: true, messageId: finalMessageId }
@@ -193,7 +194,6 @@ export async function sendMessage({
     return { success: false, error: error.message || "Error al enviar mensaje" }
   }
 }
-
 async function sendPurchaseCAPI(pixelId: string, token: string, amount: number, currency: string) {
     if (!pixelId || !token) return;
 
@@ -276,13 +276,14 @@ export async function registerSaleFromChat(data: {
   contactName?: string;
   amount: number;
   descripcion?: string;
+  productos_skus?: string[]; // 🔥 NUEVO: Recibimos los productos del frontend
 }) {
   const user = await requireAuth();
   const agentId = user.id; // 🔥 EL AGENTE QUE CERRÓ LA VENTA
   const rootOwnerId = user.rootOwnerId; // El dueño del negocio
 
   try {
-    // 🔥 NUEVO: 1. Buscar la última columna del pipeline (La de "Ventas / Cerrado")
+    // 1. Buscar la última columna del pipeline (La de "Ventas / Cerrado")
     const lastStageRes = await sql`
         SELECT id 
         FROM pipeline_stages 
@@ -324,16 +325,39 @@ export async function registerSaleFromChat(data: {
 
     await sql`
       INSERT INTO mensajes (id, conversation_id, usuario_id, content, type, is_incoming, is_receipt, amount, timestamp, processed_by_ai) 
-      VALUES (${msgId}, ${data.conversationId}, ${rootOwnerId}, ${textoFinal}, 'system', false, true, ${data.amount}, NOW())
+      VALUES (${msgId}, ${data.conversationId}, ${rootOwnerId}, ${textoFinal}, 'system', false, true, ${data.amount}, NOW(), false)
     `;
 
-    // 6. 🔥 INSERTAR EN TABLA VENTAS (Asignada al AGENTE)
+    // 6. 🔥 INSERTAR EN TABLA VENTAS (Asignada al AGENTE Y CON PRODUCTOS) 🔥
+    const skusJson = data.productos_skus && data.productos_skus.length > 0 
+      ? JSON.stringify(data.productos_skus) 
+      : null;
+
     await sql`
-      INSERT INTO ventas (amount, descripcion, contact_id, conversation_id, usuario_id, origin_message_id)
-      VALUES (${data.amount}, ${data.descripcion || null}, ${contactId}, ${data.conversationId}, ${agentId}, ${msgId})
+      INSERT INTO ventas (amount, descripcion, contact_id, conversation_id, usuario_id, origin_message_id, origen, agente_id, productos_skus)
+      VALUES (${data.amount}, ${data.descripcion || null}, ${contactId}, ${data.conversationId}, ${rootOwnerId}, ${msgId}, 'humano', ${agentId}, ${skusJson}::jsonb)
     `;
 
-    // 7. Actualizar estado de la conversación
+    // 7. 🔥 DESCONTAR STOCK REAL DE LOS PRODUCTOS 🔥
+    if (data.productos_skus && data.productos_skus.length > 0) {
+        for (const item of data.productos_skus) {
+            // Asumimos que el formato es "2x SKU-123"
+            const partes = item.split('x ');
+            if (partes.length === 2) {
+                const cantidad = parseInt(partes[0].trim()) || 1;
+                const sku = partes[1].trim();
+
+                // Actualizamos el stock del producto
+                await sql`
+                    UPDATE productos 
+                    SET stock = stock - ${cantidad} 
+                    WHERE sku = ${sku} AND usuario_id = ${rootOwnerId} AND stock >= ${cantidad}
+                `;
+            }
+        }
+    }
+
+    // 8. Actualizar estado de la conversación
     await sql`
       UPDATE conversaciones 
       SET 

@@ -72,6 +72,7 @@
     "nodemailer": "latest",
     "openai": "^4.77.3",
     "papaparse": "^5.4.1",
+    "pdf2json": "^4.0.2",
     "prisma": "latest",
     "prop-types": "latest",
     "qrcode": "1.5.4",

@@ -95,98 +95,83 @@ export async function getConnectionStatus(lineId: number): Promise<{ status: str
   const line = await sql`SELECT estado, telefono FROM lineas_whatsapp WHERE id = ${lineId}`
   return { status: line[0]?.estado || "DESCONECTADA", phoneNumber: line[0]?.telefono }
 }
-
 // Send message via WhatsApp - calls Railway backend /api/send-message
-// 🔥 ESTA ES LA FUNCIÓN CLAVE QUE NECESITABA ACTUALIZACIÓN
+// 🔥 VERSIÓN OMNICANAL DEFINITIVA
+
 export async function sendWhatsAppMessage(
-  lineId: number,
+  lineId: number | string,
   phoneNumber: string,
   message: string,
-  conversationId?: string, // Cambiado a string para coincidir con UUIDs
-  messageType: "texto" | "imagen" | "image" = "texto",
+  conversationId?: string, 
+  messageType: "texto" | "imagen" | "image" | "document" | "audio" = "texto",
+  explicitMessageId?: string // Recibimos el ID para evitar duplicados visuales
 ): Promise<{ success: boolean; error?: string }> {
   
-  // 1. Obtener usuario_id de la línea (Necesario para DB y Railway)
-  const lineData = await sql`SELECT "userId" as usuario_id, telefono FROM lineas_whatsapp WHERE id = ${lineId}`
-  
-  if (lineData.length === 0) {
-      return { success: false, error: "Línea no encontrada" }
-  }
+  // 1. Obtener usuario_id de la línea
+  const lineData = await sql`SELECT "userId" as usuario_id FROM lineas_whatsapp WHERE id = ${lineId}`
+  if (lineData.length === 0) return { success: false, error: "Línea no encontrada" }
   
   const usuarioId = lineData[0].usuario_id
-  const normalizedType = (messageType === 'imagen' || messageType === 'image') ? 'image' : 'text'
-  const cleanPhone = phoneNumber.replace(/\D/g, "")
+  const normalizedType = (messageType === 'imagen' || messageType === 'image') ? 'image' : messageType
 
-  // 2. Guardar en Base de Datos (Con la estructura nueva)
+  // 🚦 2. DESCUBRIR EL CANAL EN LA BASE DE DATOS
+  let channel = "whatsapp";
+  let omni_channel_id = null;
+
   if (conversationId) {
-    const dbContent = normalizedType === "image" ? "📷 Imagen enviada" : message
-    const dbMediaUrl = normalizedType === "image" ? message : null
+     const convData = await sql`SELECT channel, omni_channel_id FROM conversaciones WHERE id = ${conversationId}`;
+     if (convData.length > 0) {
+         channel = convData[0].channel || "whatsapp";
+         omni_channel_id = convData[0].omni_channel_id;
+     }
+  }
 
-    // 🔥 FIX: Guardamos media_url y usuario_id correctamente
-    await sql`
-      INSERT INTO mensajes (
-          conversation_id, 
-          type, 
-          content, 
-          media_url, 
-          is_incoming, 
-          timestamp, 
-          usuario_id
-      )
-      VALUES (
-          ${conversationId}, 
-          ${normalizedType}, 
-          ${dbContent}, 
-          ${dbMediaUrl}, 
-          false, 
-          NOW(), 
-          ${usuarioId}
-      )
-    `
+  // 🔥 CRÍTICO: Si es Telegram, NO borramos los caracteres raros porque los Chat ID pueden tener guiones
+  const cleanPhone = channel === 'telegram' ? phoneNumber : phoneNumber.replace(/\D/g, "");
+
+  // 3. Guardar en Base de Datos Local
+  if (conversationId) {
+    let dbContent = message;
+    if (normalizedType === "image") dbContent = "📷 Imagen enviada";
+    if (normalizedType === "document") dbContent = "📄 Documento enviado";
+    if (normalizedType === "audio") dbContent = "🎤 Audio enviado";
     
+    const dbMediaUrl = (normalizedType === "image" || normalizedType === "document" || normalizedType === "audio") ? message : null;
+
     await sql`
-      UPDATE conversaciones SET last_activity = NOW() WHERE id = ${conversationId}
+      INSERT INTO mensajes (conversation_id, type, content, media_url, is_incoming, timestamp, usuario_id)
+      VALUES (${conversationId}, ${normalizedType}, ${dbContent}, ${dbMediaUrl}, false, NOW(), ${usuarioId})
     `
+    await sql`UPDATE conversaciones SET last_activity = NOW() WHERE id = ${conversationId}`
   }
 
-  if (!WHATSAPP_SERVER_URL) {
-    return { success: true }
-  }
+  if (!WHATSAPP_SERVER_URL) return { success: true }
 
-  // 3. Preparar Payload para Railway (ESTRATEGIA ESCOPETA)
+  // 4. PREPARAR EL PAQUETE OMNICANAL PARA RAILWAY
   let payload: any = {
     lineId,
-    contactPhone: cleanPhone, // Railway pide esto estricto
-    content: message,         // Railway pide esto estricto (URL o Texto)
-    userId: usuarioId,        // Railway pide esto estricto
-    type: normalizedType,     // Pista para el servidor
+    contactPhone: cleanPhone,
+    content: message, 
+    userId: usuarioId,  
+    type: normalizedType,
+    channel: channel,                 // 🚦 ETIQUETA PARA EL ENRUTADOR
+    omni_channel_id: omni_channel_id, // 🚦 ID DEL BOT DE TELEGRAM
+    saveToDb: false,                  // 🛡️ Evita duplicados en Railway
+    messageId: explicitMessageId      // 🛡️ Mantiene el ID sincronizado
   }
 
   if (normalizedType === 'image') {
-      // Agregamos formatos extra por si es Baileys puro
-      payload = {
-          ...payload,
-          image: { url: message },
-          mediaUrl: message,
-          url: message,
-          caption: ""
-      }
+      payload = { ...payload, image: { url: message }, mediaUrl: message, url: message, caption: "" }
   } else {
-      payload = {
-          ...payload,
-          text: message
-      }
+      payload = { ...payload, text: message }
   }
 
+  // 5. Enviar a Railway
   const result = await callWhatsAppServer("/api/send-message", "POST", payload)
 
-  if (result.success) {
-    return { success: true }
-  }
-
+  if (result.success) return { success: true }
   return { success: false, error: result.error || "No se pudo enviar el mensaje." }
 }
-
 // Disconnect a line
 export async function disconnectLine(lineId: number): Promise<{ success: boolean; error?: string }> {
   await sql`

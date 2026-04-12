@@ -28,6 +28,8 @@ interface Payment {
   amount: number
   created_at: string | Date | null
   conversation_id: string
+  content?: string          // 🔥 NUEVO: El texto de "2x Zapatillas..."
+  processed_by_ai?: boolean // 🔥 NUEVO: Para saber si fue IA o Humano
 }
 
 interface ContactMessage {
@@ -312,15 +314,34 @@ const toggleTag = (tagId: string) => {
               </div>
               <div className="p-5">
                  <div className="mb-4"><p className="text-xs font-bold text-slate-400 uppercase mb-1">Total Cobrado</p><p className="text-3xl font-bold text-emerald-600">${totalPayments.toLocaleString("es-ES")}</p></div>
+                 
                  {lastPayment ? (
-                    <div className="bg-emerald-50/50 rounded-xl p-3 border border-emerald-100 mb-4">
-                        <div className="flex justify-between items-center text-sm mb-1"><span className="text-slate-600 font-medium">Último pago:</span><span className="text-emerald-700 font-bold">+${lastPayment.amount.toLocaleString()}</span></div>
-                        <p className="text-xs text-slate-400 text-right">{safeFormatDate(lastPayment.created_at)}</p>
+                    <div className="bg-emerald-50/50 rounded-xl p-3 border border-emerald-100 mb-4 flex flex-col gap-1.5">
+                        <div className="flex justify-between items-center text-sm">
+                            <span className="text-slate-600 font-medium">Último pago:</span>
+                            <span className="text-emerald-700 font-bold">+${Number(lastPayment.amount).toLocaleString("es-ES")}</span>
+                        </div>
+                        
+                        {/* 🔥 MOSTRAR QUÉ COMPRÓ EN EL ÚLTIMO PAGO */}
+                        {lastPayment.content && lastPayment.content.includes(':') && (
+                            <div className="text-[11px] font-medium text-indigo-600 bg-indigo-50/80 px-2 py-1 rounded border border-indigo-100/50 w-full truncate">
+                                {lastPayment.content.split(':')[1].trim()}
+                            </div>
+                        )}
+
+                        <p className="text-xs text-slate-400 text-right mt-1">{safeFormatDate(lastPayment.created_at)}</p>
                     </div>
-                 ) : <p className="text-sm text-slate-400 mb-4 italic">No hay registros recientes.</p>}
-                 {initialPayments.length > 0 && <Button variant="ghost" className="w-full text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 group" onClick={() => setIsPaymentModalOpen(true)}>Ver historial ({initialPayments.length}) <ChevronRight className="h-4 w-4 ml-1 transition-transform group-hover:translate-x-1" /></Button>}
+                 ) : (
+                    <p className="text-sm text-slate-400 mb-4 italic">No hay registros recientes.</p>
+                 )}
+                 
+                 {initialPayments.length > 0 && (
+                     <Button variant="ghost" className="w-full text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 group" onClick={() => setIsPaymentModalOpen(true)}>
+                         Ver historial ({initialPayments.length}) <ChevronRight className="h-4 w-4 ml-1 transition-transform group-hover:translate-x-1" />
+                     </Button>
+                 )}
               </div>
-          </GlassCard>
+        </GlassCard>
 
           <GlassCard>
               <div className="p-4 border-b border-slate-100 flex items-center gap-2 bg-slate-50/50"><MessageSquare className="h-4 w-4 text-slate-500" /><h3 className="font-semibold text-slate-700">Conversaciones</h3></div>
@@ -344,12 +365,39 @@ const toggleTag = (tagId: string) => {
             </DialogHeader>
             <ScrollArea className="h-[400px] w-full bg-white/50">
                 <div className="p-4 space-y-3">
-                    {initialPayments.map((p, index) => (
+                    {initialPayments.map((p, index) => {
+                        // 🔥 DETECTAMOS EL ORIGEN DEL PAGO AL IGUAL QUE EN EL CHAT
+                        const isManual = p.processed_by_ai !== true; 
+                        const paymentTitle = isManual ? "Pago Manual" : "Pago Verificado IA ✨";
+
+                        return (
                         <motion.div key={p.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: index * 0.05 }} className="flex items-center justify-between p-4 rounded-2xl border border-slate-100 bg-white hover:border-emerald-200 hover:shadow-md transition-all group">
-                            <div className="flex items-center gap-4"><div className="h-10 w-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100 group-hover:bg-emerald-100 transition-colors"><CheckCircle2 className="h-5 w-5" /></div><div><p className="text-sm font-bold text-slate-700">Ingreso Confirmado</p><p className="text-xs text-slate-400 capitalize flex items-center gap-1"><Clock className="h-3 w-3" /> {safeFullDate(p.created_at)}</p></div></div>
-                            <div className="text-right"><span className="block text-lg font-bold text-emerald-600">+${p.amount.toLocaleString("es-ES")}</span><Badge variant="outline" className="text-[10px] px-2 py-0 h-5 bg-emerald-50 text-emerald-700 border-emerald-200 mt-1">Aprobado</Badge></div>
+                            <div className="flex items-center gap-4">
+                                <div className={`h-10 w-10 rounded-full flex items-center justify-center border transition-colors shrink-0 ${isManual ? "bg-orange-50 border-orange-100 text-orange-600 group-hover:bg-orange-100" : "bg-emerald-50 border-emerald-100 text-emerald-600 group-hover:bg-emerald-100"}`}>
+                                    <CheckCircle2 className="h-5 w-5" />
+                                </div>
+                                <div className="min-w-0">
+                                    {/* 🔥 MOSTRAMOS EL TÍTULO DINÁMICO */}
+                                    <p className="text-sm font-bold text-slate-700 truncate">{paymentTitle}</p>
+                                    
+                                    {/* 🔥 DETALLE DE LOS PRODUCTOS VENDIDOS */}
+                                    {p.content && p.content.includes(':') && (
+                                        <p className="text-[11px] font-medium text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded w-fit my-0.5 truncate max-w-[160px]">
+                                            {p.content.split(':')[1].trim()} 
+                                        </p>
+                                    )}
+
+                                    <p className="text-xs text-slate-400 capitalize flex items-center gap-1 mt-0.5">
+                                        <Clock className="h-3 w-3 shrink-0" /> {safeFullDate(p.created_at)}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="text-right shrink-0 ml-2">
+                                <span className="block text-lg font-bold text-emerald-600">+${Number(p.amount).toLocaleString("es-ES")}</span>
+                                <Badge variant="outline" className="text-[10px] px-2 py-0 h-5 bg-emerald-50 text-emerald-700 border-emerald-200 mt-1">Aprobado</Badge>
+                            </div>
                         </motion.div>
-                    ))}
+                    )})}
                 </div>
             </ScrollArea>
             <DialogFooter className="bg-slate-50 border-t border-slate-200 p-6"><div className="w-full flex items-center justify-between"><span className="text-sm font-bold text-slate-500 uppercase tracking-wide">Total Acumulado</span><span className="text-2xl font-bold text-emerald-600">${totalPayments.toLocaleString("es-ES")}</span></div></DialogFooter>

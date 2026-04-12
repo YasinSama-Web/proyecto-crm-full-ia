@@ -58,11 +58,18 @@ async function getContactData(id: string) {
 }
 
 // 2. Nueva función para traer los Pagos (Recuperando el widget perdido)
+// 2. Nueva función para traer los Pagos (Recuperando el widget perdido)
 async function getContactPayments(phone: string) {
     try {
         // Buscamos mensajes marcados como recibos (pagos) asociados a este teléfono
         const payments = await sql`
-            SELECT m.id, m.amount, m.timestamp as created_at, m.conversation_id
+            SELECT 
+              m.id, 
+              m.amount, 
+              m.timestamp as created_at, 
+              m.conversation_id,
+              m.content,           -- 🔥 AQUÍ AGREGAMOS EL DETALLE DEL PRODUCTO
+              m.processed_by_ai    -- 🔥 AQUÍ AGREGAMOS SI FUE IA O HUMANO
             FROM mensajes m
             JOIN conversaciones c ON m.conversation_id = c.id
             WHERE c.contact_phone = ${phone} 

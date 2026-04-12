@@ -31,6 +31,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+
 // --- Componentes UI Base ---
 function GlassCard({ children, className = "", onClick }: { children: React.ReactNode; className?: string; onClick?: () => void }) {
   return (
@@ -101,7 +102,6 @@ export default function AutomationsClient() {
   const [newShortcut, setNewShortcut] = useState("")
   const [newQuickMessage, setNewQuickMessage] = useState("")
 
-  // 🔥 NUEVOS ESTADOS PARA EL NOMBRE
   const [botName, setBotName] = useState("")
   const [savingName, setSavingName] = useState(false)
 
@@ -110,9 +110,16 @@ export default function AutomationsClient() {
   const [currentAiMode, setCurrentAiMode] = useState<string>("OFF")
   const [currentAiPrompt, setCurrentAiPrompt] = useState<string>("")
 
-  const [iaBotsExtra, setIaBotsExtra] = useState(0) // 🔥 NUEVO ESTADO
-
+  const [iaBotsExtra, setIaBotsExtra] = useState(0) 
   const [userPlan, setUserPlan] = useState("STARTER")
+
+  // 🔥 NUEVO: Estado consolidado para los datos VIP del usuario
+  const [userData, setUserData] = useState({
+    addon_voice_clone: false,
+    addon_pdf_quotes: false,
+    addon_magic_fitting: false,
+    addon_prescription_reader: false
+  })
 
   // 2. FUNCIONES DE CARGA DE DATOS
   const loadChatbotsData = async () => { setChatbots(await getChatbots()) }
@@ -135,23 +142,30 @@ export default function AutomationsClient() {
     }
   }
 
-  
-   useEffect(() => {
+  useEffect(() => {
     fetch('/api/auth/me?t=' + Date.now(), { cache: 'no-store' })
       .then(res => res.json())
       .then(data => {
         if (data?.user) {
           const planReal = data.user.plan?.toUpperCase() || "STARTER";
           setCurrentPlan(planReal); 
-          setUserPlan(planReal); // 🔥 AGREGAR ESTA LÍNEA AQUÍ
-          setIaBotsExtra(data.user.ia_bots_extra || 0)
+          setUserPlan(planReal);
+          setIaBotsExtra(data.user.ia_bots_extra || 0);
+
+          // 🔥 Guardamos los booleanos VIP en el estado
+          setUserData({
+            addon_voice_clone: !!data.user.addon_voice_clone,
+            addon_pdf_quotes: !!data.user.addon_pdf_quotes,
+            addon_magic_fitting: !!data.user.addon_magic_fitting,
+            addon_prescription_reader: !!data.user.addon_prescription_reader
+          });
         }
       })
       .catch(console.error)
   }, [])
 
 
-  // 3. EFECTOS (Un solo bloque limpio)
+  // 3. EFECTOS
   useEffect(() => { 
     loadChatbotsData(); 
     loadQuickReplies(); 
@@ -164,7 +178,7 @@ export default function AutomationsClient() {
     if (selectedBot) {
         loadRules(selectedBot.id)
         setBotGreeting(selectedBot.mensaje_saludo || "")
-        setBotName(selectedBot.nombre || "") // 🔥 Cargar el nombre actual
+        setBotName(selectedBot.nombre || "") 
     } 
   }, [selectedBot])
 
@@ -198,12 +212,10 @@ export default function AutomationsClient() {
     if (result.isConfirmed) { await deleteChatbot(botId); setSelectedBot(null); loadChatbotsData(); }
   }
 
-const handleDuplicateBot = async (botId: string) => {
-    // 1. Buscamos el bot completo en nuestra lista
+  const handleDuplicateBot = async (botId: string) => {
     const botToDuplicate = chatbots.find(b => b.id === botId);
-    if (!botToDuplicate) return; // Por seguridad
+    if (!botToDuplicate) return;
 
-    // 2. SweetAlert con advertencia e input (ahora sí tiene el nombre real)
     const { value: newName } = await Swal.fire({
       title: 'Duplicar Chatbot',
       text: 'Se creará una copia exacta de este bot (flujos, archivos y respuestas). Ingresa un nombre para la copia:',
@@ -219,9 +231,8 @@ const handleDuplicateBot = async (botId: string) => {
       }
     });
 
-    if (!newName) return; // Si cancela o cierra, no hacemos nada
+    if (!newName) return;
 
-    // 3. Cargando...
     Swal.fire({
       title: 'Duplicando...',
       html: 'Generando nuevo árbol de opciones 🤖',
@@ -229,7 +240,6 @@ const handleDuplicateBot = async (botId: string) => {
       didOpen: () => Swal.showLoading()
     });
 
-    // 4. Disparamos la acción pasando el ID y el Nombre Nuevo
     const res = await duplicateChatbot(botId, newName);
     
     if (res.success) {
@@ -249,7 +259,7 @@ const handleDuplicateBot = async (botId: string) => {
       if(res.success) {
           setSelectedBot({...selectedBot, nombre: botName});
           Swal.fire({ icon: 'success', title: 'Nombre actualizado', toast: true, position: 'top-end', timer: 1500, showConfirmButton: false });
-          loadChatbotsData(); // Refresca la lista de bots en el fondo
+          loadChatbotsData(); 
       }
   }
 
@@ -265,7 +275,7 @@ const handleDuplicateBot = async (botId: string) => {
       }
   }
 
-  // --- ACTIONS RULES (CON SCROLL) ---
+  // --- ACTIONS RULES ---
   const scrollToForm = () => {
       setTimeout(() => {
           formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -385,7 +395,7 @@ const handleDuplicateBot = async (botId: string) => {
   const handleDeleteQuick = async (id: string) => { await deleteQuickReply(id); loadQuickReplies() }
   const handleSaveConfig = async () => { setLoadingConfig(true); await saveGeneralConfig(config); setLoadingConfig(false); Swal.fire({ icon: 'success', title: 'Guardado', timer: 1500, showConfirmButton: false }) }
 
-  // 4. CONFIGURACIÓN DE TABS (Con Facebook Leads incluido)
+  // 4. CONFIGURACIÓN DE TABS
   const tabs = [
     { id: "bot", label: "Departamentos & Bots", icon: <Bot className="w-4 h-4" /> },
     { id: "quick", label: "Respuestas Rápidas", icon: <Zap className="w-4 h-4" /> },
@@ -396,8 +406,6 @@ const handleDuplicateBot = async (botId: string) => {
   const renderRulesTree = (parentId: string | null = null, depth: number = 0) => {
     const children = rules.filter(r => r.parent_id === parentId).sort((a,b) => parseInt(a.tipo) - parseInt(b.tipo));
     if (children.length === 0) return null;
-
-
 
     return (
       <div className={`space-y-3 ${depth > 0 ? 'ml-6 pl-4 border-l-2 border-indigo-100/50' : ''}`}>
@@ -447,33 +455,29 @@ const handleDuplicateBot = async (botId: string) => {
   const rootRules = rules.filter(r => r.parent_id === null).sort((a,b) => parseInt(a.tipo) - parseInt(b.tipo));
   const displayGreeting = selectedBot?.mensaje_saludo || config.mensaje_bienvenida || "¡Hola! Bienvenido a nuestro servicio.";
 
-// --- MATEMÁTICA DE LÍMITES PARA CREAR BOTS ---
-  // Starter: 1, Pro: 3, Enterprise: 5 (o 9999 si es infinito)
+  // --- MATEMÁTICA DE LÍMITES PARA CREAR BOTS ---
   const baseBots = userPlan === 'ENTERPRISE' ? 5 : userPlan === 'PRO' ? 3 : 1; 
   const limitBots = baseBots; 
   const usedBots = chatbots.length;
   const isBotLimitReached = usedBots >= limitBots;
 
-// --- MATEMÁTICA QUIRÚRGICA PARA IA VENDEDORA (FULL) ---
-  // Starter: 0, Pro: 1, Enterprise: 1 (Límite base por plan)
+  // --- MATEMÁTICA QUIRÚRGICA PARA IA VENDEDORA (FULL) ---
   const baseAIBots = userPlan === 'ENTERPRISE' ? 1 : userPlan === 'PRO' ? 1 : 0; 
-  
-  // Sumamos la base + los extras que compró (Addons)
   const totalAIBotsAllowed = baseAIBots + iaBotsExtra;
-
-  // 🔥 CORRECCIÓN CLAVE: En tu DB la columna es 'ai_mode', no 'mode'
   const usedAIBots = chatbots.filter(b => b.ai_mode === 'FULL').length;
-  
-  // Revisamos si el bot que el usuario tiene seleccionado AHORA ya tiene la IA
   const isThisBotAlreadyFull = selectedBot?.ai_mode === 'FULL';
-
-  // ESTA ES LA MAGIA: Solo podemos activar la IA si:
-  // 1. O si el bot que estás editando ya la tiene
-  // 2. O si los que estás usando son MENOS que los que tienes permitidos en total
   const canEnableFullForThisBot = isThisBotAlreadyFull || (usedAIBots < totalAIBotsAllowed);
-  
   const canUseFull = canEnableFullForThisBot;
 
+  // 🔥 EL ARRAY DINÁMICO DE ADDONS VIP
+  const myActiveAddons = [
+    userData.addon_voice_clone ? "VOICE_CLONING" : null,
+    userData.addon_pdf_quotes ? "PDF_GENERATOR" : null,
+    userData.addon_magic_fitting ? "MAGIC_FITTING" : null,
+    userData.addon_prescription_reader ? "OCR_READER" : null
+  ].filter(Boolean) as string[];
+
+  // DE AQUÍ EN ADELANTE SIGUE TU CÓDIGO NORMAL (return ( ... ))
   return (
     <div className="flex-1 space-y-6 pb-20">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -647,6 +651,7 @@ const handleDuplicateBot = async (botId: string) => {
     pipelineStages={pipelineStages}
     baseAIBots={totalAIBotsAllowed}
     canUseFull={canUseFull} 
+    activeAddons={myActiveAddons} // 🔥 ¡Conectado al mundo real!
   />
                         
                         {/* FORMULARIO (Con Ref para el Scroll) */}

@@ -6,7 +6,10 @@ export async function POST(req: Request) {
   try {
     const user = await requireAuth({ requiredFeature: "sales" });
     const rootId = user.rootOwnerId;
-    const { phone, name, amount, stageId, concept } = await req.json();
+    const agentId = user.id; // 🔥 Agente que cerró la venta
+    
+    // 🔥 NUEVO: Recibimos los SKUs desde el frontend del Kanban
+    const { phone, name, amount, stageId, concept, productos_skus } = await req.json();
 
     const existing = await sql`SELECT id FROM "Contact" WHERE phone = ${phone} AND usuario_id = ${rootId}`;
     let contactId;
@@ -16,7 +19,6 @@ export async function POST(req: Request) {
       await sql`UPDATE "Contact" SET name = COALESCE(${name}, name), deal_value = COALESCE(deal_value, 0) + ${amount}, updated_at = NOW(), pipeline_stage_id = ${stageId} WHERE id = ${contactId}`;
     } else {
       contactId = 'c_' + Math.random().toString(36).substr(2, 9);
-      // 🔥 CORRECCIÓN CRÍTICA: Sintaxis SQL corregida (updated_at va en columnas, NOW() en values)
       await sql`INSERT INTO "Contact" (id, usuario_id, phone, name, deal_value, updated_at, pipeline_stage_id) VALUES (${contactId}, ${rootId}, ${phone}, ${name}, ${amount}, NOW(), ${stageId})`;
     }
 
@@ -28,10 +30,8 @@ export async function POST(req: Request) {
 
     const textoConcepto = concept ? ` (${concept})` : '';
     const textoFinal = `💰 Pago Manual registrado${textoConcepto}: $${amount}`;
-
     const msgId = 'msg_' + Math.random().toString(36).substr(2, 9);
     
-    // 🔥 FORZAMOS FALSE: Agregamos processed_by_ai y le pasamos false
     await sql`
       INSERT INTO mensajes (
         id, conversation_id, usuario_id, content, type, 
@@ -43,7 +43,31 @@ export async function POST(req: Request) {
       )
     `;
 
-    await sql`INSERT INTO ventas (amount, contact_id, usuario_id, origin_message_id) VALUES (${amount}, ${contactId}, ${rootId}, ${msgId})`;
+    // 🔥 NUEVO: FORMATO JSON PARA SKUS Y CREACIÓN DE VENTA E-COMMERCE
+    const skusJson = productos_skus && productos_skus.length > 0 
+      ? JSON.stringify(productos_skus) 
+      : null;
+
+    await sql`
+      INSERT INTO ventas (amount, descripcion, contact_id, conversation_id, usuario_id, origin_message_id, origen, agente_id, productos_skus) 
+      VALUES (${amount}, ${concept || null}, ${contactId}, ${convId}, ${rootId}, ${msgId}, 'humano', ${agentId}, ${skusJson}::jsonb)
+    `;
+
+    // 🔥 NUEVO: DESCUENTO DE STOCK REAL
+    if (productos_skus && productos_skus.length > 0) {
+        for (const item of productos_skus) {
+            const partes = item.split('x ');
+            if (partes.length === 2) {
+                const cantidad = parseInt(partes[0].trim()) || 1;
+                const sku = partes[1].trim();
+                await sql`
+                    UPDATE productos 
+                    SET stock = stock - ${cantidad} 
+                    WHERE sku = ${sku} AND usuario_id = ${rootId} AND stock >= ${cantidad}
+                `;
+            }
+        }
+    }
 
     return NextResponse.json({ success: true, contactId });
   } catch (error) {

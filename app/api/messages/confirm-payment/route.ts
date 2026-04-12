@@ -13,9 +13,10 @@ export async function POST(req: Request) {
         SELECT 
             c.contact_phone, 
             c.source_landing_id,  
-            l.nombre as line_name
+            COALESCE(l.nombre, o.name, 'Canal Desconocido') as line_name
         FROM conversaciones c 
-        JOIN lineas_whatsapp l ON c."lineId" = l.id 
+        LEFT JOIN lineas_whatsapp l ON c."lineId" = l.id 
+        LEFT JOIN omni_channels o ON c.omni_channel_id = o.id
         WHERE c.id = ${conversationId}
     `
     

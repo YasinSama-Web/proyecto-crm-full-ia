@@ -23,6 +23,7 @@ import { GlobalLoader } from "@/components/ui/global-loader"
 
 // IMPORTANTE: Asegúrate de que esta función exista en tu actions de campañas
 import { getAllContactsForSelector } from "@/app/dashboard/campaigns/actions" 
+import React from "react"
 
 interface Deal { id: string, contact_name: string, phone: string, deal_value: number, pipeline_stage_id: string, tags: string[], updated_at?: string }
 interface Stage { id: string, name: string, color: string, bgFrom: string, bgTo: string, dotColor: string }
@@ -212,6 +213,33 @@ export default function SalesPipelinePage() {
 
   const todayArg = new Date().toLocaleString("sv-SE", { timeZone: "America/Argentina/Buenos_Aires" }).split(' ')[0];
 
+  const [productos, setProductos] = useState<any[]>([]);
+const [productosSeleccionados, setProductosSeleccionados] = useState<any[]>([]);
+const [cargandoProductos, setCargandoProductos] = useState(false);
+
+const [hasEcommerceAddon, setHasEcommerceAddon] = useState(false);
+
+// 🔥 FUNCIONES DEL CARRITO DE COMPRAS QUE FALTABAN
+  const actualizarCarrito = (nuevaLista: any[]) => {
+    setProductosSeleccionados(nuevaLista);
+    const nuevoTotal = nuevaLista.reduce((acc, curr) => acc + (curr.precio * curr.cantidad), 0);
+    setSaleAmount(nuevoTotal > 0 ? nuevoTotal.toString() : "");
+    setSaleConcept(nuevaLista.length > 0 ? `Venta manual: ${nuevaLista.map(p => `${p.cantidad}x ${p.nombre}`).join(', ')}` : "");
+  };
+
+  const cambiarCantidad = (sku: string, delta: number) => {
+    const nuevaLista = productosSeleccionados.map(p => {
+      if (p.sku === sku) {
+        const prodDb = productos.find(x => x.sku === sku);
+        const maxStock = prodDb ? prodDb.stock : 999;
+        const nuevaCant = Math.max(1, Math.min(p.cantidad + delta, maxStock));
+        return { ...p, cantidad: nuevaCant };
+      }
+      return p;
+    });
+    actualizarCarrito(nuevaLista);
+  };
+
   // 🔥 NUEVO ESTADO DE FECHAS
   const [date, setDate] = useState<DateRange | undefined>({
     from: new Date(todayArg + "T00:00:00"), 
@@ -225,10 +253,18 @@ export default function SalesPipelinePage() {
     fetch('/api/tags').then(res => res.ok ? res.json() : []).then(data => setAvailableTags(data)).catch(console.error)
   }, [])
 
-  const fetchGoalData = useCallback(async () => {
+const fetchGoalData = useCallback(async () => {
     try {
       const res = await fetch('/api/pipeline/goal')
       if (res.ok) setGoalData(await res.json())
+      
+      // 🔥 NUEVO: Verificamos silenciosamente si tiene el Addon
+      const meRes = await fetch('/api/auth/me') 
+      if (meRes.ok) {
+         const meData = await meRes.json()
+         // 🚨 AQUÍ ESTABA EL ERROR: Agregamos ".user." antes de addon_ecommerce
+         setHasEcommerceAddon(meData.user?.addon_ecommerce || false)
+      }
     } catch (e) { console.error("Error trayendo meta:", e) }
   }, [])
 
@@ -246,7 +282,7 @@ const fetchPipelineData = useCallback((currentDateRange: any) => {
        url += `?from=${fromStr}&to=${toStr}`
     }
 
-    fetch(url)
+    fetch(url, { headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } })
       .then(res => res.json())
       .then(data => {
         if(data.stages) {
@@ -262,24 +298,27 @@ useEffect(() => {
     // Ahora enviamos la fecha siempre (ya sea un rango o undefined)
     fetchPipelineData(date)
   }, [date, fetchPipelineData])
-
-  // 3. CARGAR CONTACTOS PARA VENTA MANUAL
+  
+// 🔥 EL BUSCADOR DE PRODUCTOS QUE FALTABA
   useEffect(() => {
-    async function loadContacts() {
-      if (isNewSaleOpen && contactsList.length === 0) {
-        try {
-          const contacts = await getAllContactsForSelector();
-          const contactosLimpios = contacts.filter((c: any) => {
-              if (!c.phone) return false;
-              const soloNumeros = c.phone.replace(/\D/g, '');
-              return soloNumeros.length >= 11 && soloNumeros.length <= 15;
-          });
-          setContactsList(contactosLimpios);
-        } catch (error) { console.error("Error cargando contactos:", error); }
+    if (!isNewSaleOpen) return; // Solo buscar si se abre el modal
+    
+    const fetchProductos = async () => {
+      setCargandoProductos(true);
+      try {
+        const res = await fetch('/api/products?activos=true'); 
+        if (!res.ok) return;
+        const data = await res.json();
+        const arrayProductos = data.productos || data.products || (Array.isArray(data) ? data : []);
+        setProductos(arrayProductos);
+      } catch (error) {
+        console.error("Error cargando productos:", error);
+      } finally {
+        setCargandoProductos(false);
       }
-    }
-    loadContacts();
-  }, [isNewSaleOpen, contactsList.length]);
+    };
+    fetchProductos();
+  }, [isNewSaleOpen]);
 
   // 4. DEBOUNCE BUSCADOR
   useEffect(() => {
@@ -462,7 +501,8 @@ const deals = useMemo(() => {
             amount: Number(saleAmount),
             stageId: targetStageId,
             method: saleMethod,
-            concept: saleConcept 
+            concept: saleConcept,
+            productos_skus: productosSeleccionados.map(p => `${p.cantidad}x ${p.sku}`)
         }
         
         await fetch('/api/pipeline/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
@@ -477,6 +517,7 @@ const deals = useMemo(() => {
      } catch(e) {
         Swal.fire("Error", "No se pudo registrar la venta.", "error")
      }
+     setProductosSeleccionados([]);
   }
 
   useEffect(() => {
@@ -718,12 +759,22 @@ if (!isMounted || isLoading) return <GlobalLoader title="Cargando Embudo" subtit
 )}>
   <CheckCircle2 className="h-4 w-4" />
 </div>
-                                  <div>
-                                    <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{paymentTitle}</p>
-                                    <p className="text-xs text-slate-400">
-                                      {new Date(p.created_at).toLocaleDateString("es-ES", { day: "numeric", month: "short", hour: '2-digit', minute:'2-digit' })}
-                                    </p>
-                                  </div>
+                                  <div className="min-w-0">
+     {/* Título de Pago */}
+     <p className="text-sm font-bold text-slate-700 dark:text-slate-300 truncate">{paymentTitle}</p>
+     
+     {/* 🔥 DETALLE DE LOS PRODUCTOS VENDIDOS (El letrerito morado) */}
+     {p.content && p.content.includes(':') && (
+         <p className="text-[11px] font-medium text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/30 px-1.5 py-0.5 rounded w-fit my-0.5 truncate max-w-[180px] border border-violet-100 dark:border-violet-800/50">
+             {p.content.split(':')[1].trim()} 
+         </p>
+     )}
+
+     {/* Fecha */}
+     <p className="text-xs text-slate-400 capitalize flex items-center gap-1 mt-0.5">
+       {new Date(p.created_at).toLocaleDateString("es-ES", { day: "numeric", month: "short", hour: '2-digit', minute:'2-digit' })}
+     </p>
+   </div>
                                 </div>
                                 <span className="font-bold text-emerald-600 dark:text-emerald-400">+${Number(p.amount).toLocaleString()}</span>
                               </div>
@@ -857,6 +908,96 @@ if (!isMounted || isLoading) return <GlobalLoader title="Cargando Embudo" subtit
                     <Input placeholder="Ej: Curso de Marketing, Renovacion..." className="pl-9 h-11" value={saleConcept} onChange={(e) => setSaleConcept(e.target.value)} />
                 </div>
               </div>
+
+              {hasEcommerceAddon && (
+                  <div className="space-y-3 bg-muted/30 p-4 rounded-xl border border-border border-dashed">
+                    <label className="text-xs font-bold text-muted-foreground uppercase flex items-center gap-2">
+                       🛒 Productos de esta venta
+                    </label>
+                    
+                    {/* DESPLEGABLE PARA AGREGAR AL CARRITO */}
+                    <select 
+                        disabled={cargandoProductos || productos.length === 0}
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 font-medium"
+                        onChange={(e) => {
+                            if (!e.target.value) return;
+                            const prod = productos.find(p => p.sku === e.target.value);
+                            if (prod) {
+                                let nuevaLista = [...productosSeleccionados];
+                                const existe = nuevaLista.find(p => p.sku === prod.sku);
+                                if (existe) {
+                                    if (existe.cantidad < prod.stock) existe.cantidad += 1;
+                                } else {
+                                    nuevaLista.push({sku: prod.sku, nombre: prod.nombre, cantidad: 1, precio: Number(prod.precio)});
+                                }
+                                actualizarCarrito(nuevaLista);
+                            }
+                            e.target.value = ""; // Resetear selector
+                        }}
+                    >
+                        <option value="">
+                          {cargandoProductos ? "Cargando inventario..." : "✨ + Agregar un producto..."}
+                        </option>
+                        {productos.map(p => (
+                            <option key={p.id} value={p.sku} disabled={p.stock <= 0}>
+                              {p.nombre} (Stock: {p.stock}) - ${Number(p.precio).toLocaleString('es-AR')}
+                            </option>
+                        ))}
+                    </select>
+
+                    {/* LISTADO TIPO CARRITO CON CANTIDADES */}
+                    {productosSeleccionados.length > 0 && (
+                        <div className="space-y-2 mt-3 pt-3 border-t border-dashed">
+                            {productosSeleccionados.map((item, idx) => {
+                                const prodDb = productos.find(p => p.sku === item.sku);
+                                const hasStock = prodDb && item.cantidad < prodDb.stock;
+
+                                return (
+                                <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-background p-3 rounded-lg border shadow-sm text-sm gap-3">
+                                    <div className="flex-1 min-w-0">
+                                        <span className="font-bold text-foreground block truncate">{item.nombre}</span>
+                                        <span className="text-muted-foreground text-xs">${Number(item.precio).toLocaleString('es-AR')} c/u</span>
+                                    </div>
+                                    
+                                    <div className="flex items-center gap-3 sm:justify-end">
+                                        {/* CONTROLES DE CANTIDAD */}
+                                        <div className="flex items-center bg-muted rounded-md border border-border overflow-hidden">
+                                            <button 
+                                                onClick={() => cambiarCantidad(item.sku, -1)}
+                                                className="px-2.5 py-1 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-30"
+                                                disabled={item.cantidad <= 1}
+                                            > - </button>
+                                            <span className="px-2 font-bold min-w-[2rem] text-center text-xs">{item.cantidad}</span>
+                                            <button 
+                                                onClick={() => cambiarCantidad(item.sku, 1)}
+                                                className="px-2.5 py-1 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-30"
+                                                disabled={!hasStock}
+                                                title={!hasStock ? "Stock máximo alcanzado" : ""}
+                                            > + </button>
+                                        </div>
+
+                                        <span className="font-black text-emerald-600 min-w-[4rem] text-right">
+                                            ${(item.precio * item.cantidad).toLocaleString('es-AR')}
+                                        </span>
+                                        
+                                        {/* ELIMINAR */}
+                                        <button 
+                                            onClick={() => {
+                                                const newList = productosSeleccionados.filter(p => p.sku !== item.sku);
+                                                actualizarCarrito(newList);
+                                            }}
+                                            className="text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded-md p-1.5 transition-colors"
+                                        >
+                                            <X className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </div>
+                            )})}
+                        </div>
+                    )}
+                  </div>
+              )}
+
 
               <div className="space-y-2">
                 <label className="text-sm font-medium">Monto Cobrado ($)</label>

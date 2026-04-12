@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from "react"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
-import { Search, Filter, Inbox, Check, CheckCheck, Loader2, RefreshCcw, DollarSign, MessageSquare, AlertCircle, Archive, Users, ListChecks, X, Tag, UserPlus } from "lucide-react"
+import { Search, Filter, Inbox, Check, CheckCheck, Loader2, RefreshCcw, DollarSign, MessageSquare, AlertCircle, Archive, Users, ListChecks, X, Tag, UserPlus, Brain } from "lucide-react" // 🔥 Brain añadido
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -14,7 +14,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useSocket } from "@/hooks/use-socket" 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
-
+import { useNotifications } from "@/contexts/notification-context"
 // --- HELPERS VISUALES ---
 function SidebarStatus({ status }: { status?: string }) {
   if (status === "read") return <CheckCheck className="w-3.5 h-3.5 text-[#53bdeb]" /> 
@@ -48,6 +48,18 @@ const truncateText = (text: string | null, maxLength: number = 25): string => {
   return text.slice(0, maxLength) + "..."
 }
 
+// 🔥 Helper para colores dinámicos en los avatares
+const getAvatarGradient = (str: string) => {
+    const gradients = [
+        "from-teal-400 to-emerald-500", "from-cyan-400 to-blue-500", 
+        "from-violet-400 to-purple-500", "from-amber-400 to-orange-500",
+        "from-rose-400 to-red-500", "from-pink-400 to-rose-500"
+    ];
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    return gradients[Math.abs(hash) % gradients.length];
+};
+
 // --- PROPS ---
 interface ConversationListProps {
   userId: string
@@ -73,8 +85,7 @@ export function ConversationList({
   
   const queryClient = useQueryClient()
   const { socket } = useSocket()
-
-  // Estados
+  const { clearNotificationsByConversation } = useNotifications()
   const [searchTerm, setSearchTerm] = useState("")
   const [tab, setTab] = useState<"TODOS" | "OPEN" | "INBOX" | "RESOLVED" | "GROUPS">("OPEN")
   const [selectedLines, setSelectedLines] = useState<string[]>([])
@@ -82,9 +93,7 @@ export function ConversationList({
 
   const [optimisticSelectedId, setOptimisticSelectedId] = useState<string | null>(null);
 
-  // 🔥 ESTADOS PARA ACCIONES MASIVAS
   const [isSelectionMode, setIsSelectionMode] = useState(false)
-  // 🔥 ESTADOS PARA EL MODAL DE ASIGNACIÓN
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false)
   const [selectedAgentToAssign, setSelectedAgentToAssign] = useState<string | null>(null)
   const [assignNote, setAssignNote] = useState("")
@@ -98,7 +107,6 @@ export function ConversationList({
     setOptimisticSelectedId(selectedId);
   }, [selectedId]);
 
-  // --- REACT QUERY ---
   const { data: conversations = [], isLoading, isError } = useQuery({
     queryKey: ['conversations'], 
     queryFn: async () => {
@@ -107,21 +115,19 @@ export function ConversationList({
       const data = await res.json()
       return Array.isArray(data) ? data : (data.data || data.conversations || [])
     },
-    staleTime: 0, 
-    refetchOnWindowFocus: true, 
+    staleTime: Infinity,          // 🔥 1. La data ya no caduca, máxima fluidez
+    refetchOnMount: true,         // 🔥 2. Carga la lista 1 sola vez al entrar
+    refetchOnWindowFocus: false,  // 🔥 3. No recarga si cambias de pestaña
     refetchInterval: 1000, 
   })
 
-  // --- SOCKETS Y EVENTOS GLOBALES ---
   useEffect(() => {
       const handleRefresh = () => queryClient.invalidateQueries({ queryKey: ['conversations'] })
-      
       if(socket) {
           socket.on('new_message', handleRefresh)
           socket.on('conversation_update', handleRefresh) 
       }
       window.addEventListener('refresh_conversations', handleRefresh)
-      
       return () => { 
         if(socket) {
             socket.off('new_message', handleRefresh)
@@ -132,15 +138,12 @@ export function ConversationList({
   }, [socket, queryClient])
 
 
-// 🔥 REEMPLAZAR toda la lógica de filteredConversations
-
 const isPeerAgent = (assignedId: string) => {
   if (!assignedId || assignedId.length < 10 || assignedId === "null" || assignedId === "undefined") return false;
   const agent = agents.find(a => String(a.id) === assignedId);
-  if (!agent) return false; // Si no está en la lista de agentes, lo ignoramos
+  if (!agent) return false; 
   const role = String(agent.role || '').toUpperCase();
   const name = String(agent.nombre || agent.name || '').toLowerCase();
-  // 🔥 Si se llama soporte o es owner, NO ES UN AGENTE COMPETIDOR
   if (role === 'OWNER' || role === 'SUPER_ADMIN' || name.includes('soporte')) return false;
   return true;
 };
@@ -155,9 +158,6 @@ const filteredConversations = useMemo(() => {
     const isGroup = c.is_group === true || (c.contact_phone && c.contact_phone.includes('-'));
     
     const assignedId = c.assigned_to ? String(c.assigned_to).trim() : "";
-    
-    // 🔥 REGLA DE ORO: Es de otro agente SOLO SI es un Agente Real Y no soy yo.
-    // Si es Soporte, isPeerAgent dará false, por lo que isAssignedToOtherAgent será FALSE.
     const isAssignedToOtherAgent = isPeerAgent(assignedId) && assignedId !== currentUserIdStr;
 
     let matchesTab = false;
@@ -167,15 +167,12 @@ const filteredConversations = useMemo(() => {
     } else if (isGroup) {
       return false;
     } else if (tab === "TODOS") {
-      // 🔥 TODOS: Veo todos los activos (Míos y de otros), pero NO los Archivados.
       matchesTab = status === "OPEN" || status === "INBOX" || status === "PENDING";
     } else if (tab === "INBOX") {
       matchesTab = (status === "INBOX" || status === "PENDING");
     } else if (tab === "OPEN") {
-      // 🔥 BANDEJA PRINCIPAL (Míos y libres): Veo lo abierto, MENOS lo que tienen los otros Agentes Reales.
       matchesTab = status === "OPEN" && !isAssignedToOtherAgent;
     } else if (tab === "RESOLVED") {
-      // 🔥 Le sumamos ABANDONED a la lista
       matchesTab = ['RESOLVED', 'CLOSED', 'FIXED', 'ABANDONED'].includes(status);
     }
 
@@ -188,7 +185,6 @@ const filteredConversations = useMemo(() => {
 
     if (selectedLines.length > 0 && !selectedLines.includes(c.line_id || c.lineId)) return false;
     
-    // Filtros de etiquetas
     if (selectedTags.length > 0) {
       if (!c.tags || c.tags.length === 0) return false;
       const hasTag = c.tags.some((tagItem: string) => {
@@ -201,16 +197,13 @@ const filteredConversations = useMemo(() => {
     }
     
   if (tab === "RESOLVED" && selectedStatuses.length > 0) {
-        // Agrupamos los estados de éxito antiguos para que no desaparezcan
         const isSuccess = ['RESOLVED', 'CLOSED', 'FIXED'].includes(status);
         const mappedStatus = isSuccess ? 'RESOLVED' : status;
-        
         if (!selectedStatuses.includes(mappedStatus)) return false;
     }
     
     return true;
 
-    
   }).sort((a, b) => {
     const dateA = new Date(a.last_activity || 0).getTime();
     const dateB = new Date(b.last_activity || 0).getTime();
@@ -228,7 +221,6 @@ const formatPreview = (text: string | null) => {
   return text;
 };
 
-// --- CONTADORES ---
 const checkIsGroup = (c: any) => c.is_group === true || (c.contact_phone || "").length > 15 || (c.remote_jid && c.remote_jid.endsWith('@g.us'));
 
 const countInbox = Array.isArray(conversations) ? conversations.filter(c => !checkIsGroup(c) && ['INBOX', 'PENDING'].includes((c.status || 'INBOX').toUpperCase())).length : 0;
@@ -236,11 +228,8 @@ const countInbox = Array.isArray(conversations) ? conversations.filter(c => !che
 const countOpen = Array.isArray(conversations) ? conversations.filter((c: any) => {
     const status = (c.status || '').toUpperCase();
     const isGroup = checkIsGroup(c);
-    
     const assignedId = c.assigned_to ? String(c.assigned_to).trim() : "";
     const currentUserIdStr = String(userId).trim();
-    
-    // 🔥 EL MISMO FILTRO DEL RENDERIZADO
     const isAssignedToOtherAgent = isPeerAgent(assignedId) && assignedId !== currentUserIdStr;
     
     return !isGroup && status === 'OPEN' && !isAssignedToOtherAgent;
@@ -251,18 +240,14 @@ const countGroups = Array.isArray(conversations) ? conversations.filter(c => che
 
 const activeFiltersCount = selectedLines.length + selectedTags.length + selectedStatuses.length
 
-
-// 🔥 FUNCIONES DE ACCIONES MASIVAS
   const toggleSelection = (id: string) => {
     setSelectedChats(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id])
   }
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      // Selecciona todos los IDs que estén actualmente filtrados en la pantalla
       setSelectedChats(filteredConversations.map((c: any) => c.id));
     } else {
-      // Desmarca todos
       setSelectedChats([]);
     }
   }
@@ -305,8 +290,8 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       setSelectedChats([]);
       setIsSelectionMode(false);
-      setIsAssignModalOpen(false); // Cerramos el modal
-      setAssignNote(""); // Limpiamos la nota
+      setIsAssignModalOpen(false); 
+      setAssignNote(""); 
       setSelectedAgentToAssign(null);
     } catch (error) {
       console.error("Error asignando", error);
@@ -324,7 +309,7 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
         <NewChatDialog userId={userId} />
       </div>
 
-      {/* TABS (PESTAÑAS) - MEJORADAS CON SCROLL Y TAMAÑO */}
+      {/* TABS */}
       <div className="px-2 pb-2">
           <div className="flex gap-1 p-1 bg-muted/50 rounded-lg overflow-x-auto no-scrollbar">
               <button onClick={() => setTab("TODOS")} className={`shrink-0 px-3 py-1.5 text-sm font-semibold rounded-md transition-all ${tab === "TODOS" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
@@ -352,7 +337,6 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
           <Input placeholder="Buscar..." className="pl-9 h-9" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
         </div>
         
-        {/* BOTÓN MODO SELECCIÓN MASIVA */}
         <Button 
           variant={isSelectionMode ? "default" : "outline"} 
           onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedChats([]); }} 
@@ -399,7 +383,6 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
                    </div>
                 )}
 
-                {/* 🔥 NUEVA SECCIÓN DE ESTADOS (Solo visible en pestaña Listos) */}
                 {tab === "RESOLVED" && (
                     <div className="space-y-2 pt-2 border-t border-border">
                         <Label className="text-xs">Estado de Cierre</Label>
@@ -438,11 +421,10 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
       {/* LISTA DE CHATS */}
       <div className="flex-1 min-h-0 overflow-hidden relative">
           <ScrollArea className="h-full w-full">
-            <div className="flex flex-col px-3 pb-20 pt-1 gap-1.5">
+            <div className="flex flex-col pb-20 pt-1">
               {isLoading && <div className="flex justify-center py-10"><Loader2 className="animate-spin text-muted-foreground" /></div>}
               {isError && <div className="text-center py-10 text-red-500 text-sm">Error cargando chats</div>}
 
-              {/* 🔥 MENSAJE DE VACÍO (CORREGIDO) */}
               {!isLoading && !isError && filteredConversations.length === 0 && (
                 <div className="text-center py-10 text-muted-foreground text-sm flex flex-col items-center">
                     {tab === "RESOLVED" ? <Archive className="h-10 w-10 opacity-20 mb-2" /> : <Inbox className="h-10 w-10 opacity-20 mb-2" />}
@@ -450,11 +432,19 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
                 </div>
               )}
 
-              {/* 🔥 RENDERIZADO DE CHATS (YA NO ESTÁ ATRAPADO) */}
+              {/* 🔥 RENDERIZADO DE CHATS (MODERNIZADO) */}
               {filteredConversations.map((conv: any) => {
                   const isSelected = optimisticSelectedId === conv.id || selectedId === conv.id
                   const hasDraft = drafts[conv.id] && drafts[conv.id].trim().length > 0
                   const isChecked = selectedChats.includes(conv.id)
+                  
+                  const contactIdName = conv.contact_name || conv.contact_phone || "#";
+                  const avatarGradient = getAvatarGradient(contactIdName);
+
+                  // Determinamos si tenemos que pintar el área de etiquetas
+                  const hasTags = conv.tags && conv.tags.length > 0;
+                  const assignedId = conv.assigned_to ? String(conv.assigned_to).trim() : "";
+                  const isAssignedToAgent = isPeerAgent(assignedId) && assignedId !== String(userId).trim();
                   
                   return (
                     <button
@@ -465,44 +455,59 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
                               toggleSelection(conv.id);
                               return;
                           }
+                          
                           setOptimisticSelectedId(conv.id); 
                           onSelect(conv);                    
-                          if (conv.unread_count > 0) {
+                          
+                          // 🔥 1. APAGAMOS LA NOTIFICACIÓN DE LA CAMPANITA
+                          clearNotificationsByConversation(conv.id);
+
+                          // 🔥 2. APAGAMOS TODO LO VISUAL Y ACTUALIZAMOS LA BASE DE DATOS
+                          if (conv.unread_count > 0 || conv.unread_ia_payment || conv.unread_ia_furious) {
                               markConversationAsRead(conv.lineId || conv.line_id, conv.id).catch(() => {})
                               conv.unread_count = 0 ;
                               conv.unread_ia_payment = false;
+                              conv.unread_ia_furious = false;
                           }
                       }}
                       className={`
-                        w-full text-left p-3 rounded-xl transition-all duration-200 group relative border overflow-hidden cursor-pointer
-                        ${isSelected && !isSelectionMode ? "bg-primary text-primary-foreground shadow-md border-primary/50" : "bg-card hover:bg-muted/50 border-border/40 hover:border-border"}
-                        ${isChecked && isSelectionMode ? "ring-2 ring-primary bg-primary/5" : ""}
-                      `}
+          w-full text-left p-3.5 transition-all duration-150 group relative border-b border-slate-200 dark:border-slate-800 cursor-pointer
+          ${isSelected && !isSelectionMode ? "bg-blue-50/80 dark:bg-blue-900/20" : "bg-transparent hover:bg-slate-50 dark:hover:bg-slate-900/40"}
+        `}
                     >
-                       <div className="flex items-center gap-3 w-full min-w-0">
+                       <div className="flex items-start gap-3 w-full min-w-0">
                          
-                         {/* MODO SELECCIÓN CHECKBOX */}
                          {isSelectionMode && (
-                           <div className="shrink-0">
+                           <div className="shrink-0 mt-3">
                              <div className={`h-5 w-5 rounded border flex items-center justify-center transition-colors ${isChecked ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground/30 bg-background'}`}>
                                {isChecked && <Check className="h-3 w-3" />}
                              </div>
                            </div>
                          )}
 
-                         {/* AVATAR */}
-                         <div className="relative shrink-0">
-                             <div className={`h-12 w-12 rounded-full flex items-center justify-center text-lg font-bold shadow-sm ${isSelected && !isSelectionMode ? "bg-white/20 text-white" : "bg-muted text-foreground"}`}>
-                                 {(conv.contact_name?.[0] || conv.contact_phone?.[0] || "#").toUpperCase()}
+                         {/* AVATAR COLORIDO */}
+                         <div className="relative shrink-0 mt-1">
+                             <div className={`h-11 w-11 rounded-full flex items-center justify-center text-lg font-bold shadow-sm text-white bg-gradient-to-br ${avatarGradient}`}>
+                                 {contactIdName[0].toUpperCase()}
                              </div>
                              
-                             {/* 🔥 LÓGICA DE PUNTOS: Verde (Venta IA) vs Rojo (Mensaje Normal) */}
-                             {conv.unread_ia_payment ? (
+                             
+                             {conv.unread_ia_furious ? (
+                                <span className="absolute -top-1 -right-4 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 shadow-sm shadow-red-600/50 animate-pulse ring-2 ring-background z-10" title="¡Cliente Furioso / Pide Agente!">
+                                    🚨 SOS
+                                </span>
+                             ) 
+                             
+                            
+                             : conv.unread_ia_payment ? (
                                 <span className="absolute -top-1 -right-4 bg-emerald-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 shadow-sm shadow-emerald-500/50 animate-pulse ring-2 ring-background z-10" title="Pago procesado por IA">
                                     <DollarSign className="w-3 h-3" /> IA
                                 </span>
-                             ) : conv.unread_count > 0 ? (
-                                <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 rounded-full text-[10px] text-white flex items-center justify-center font-bold ring-2 ring-background z-10 shadow-sm shadow-red-500/30">
+                             ) 
+                             
+                           
+                             : conv.unread_count > 0 ? (
+                                <span className="absolute -top-1 -right-1 h-5 w-5 bg-blue-500 rounded-full text-[10px] text-white flex items-center justify-center font-bold ring-2 ring-background z-10 shadow-sm shadow-blue-500/30">
                                     {conv.unread_count}
                                 </span>
                              ) : null}
@@ -511,14 +516,27 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
                          {/* CONTENIDO PRINCIPAL */}
                          <div className="flex flex-col flex-1 min-w-0">
                              
-                             {/* 1. Nombre y Hora */}
-                              <div className="flex justify-between items-start mb-1 w-full min-w-0">
-                                  <span className={`font-semibold truncate text-sm flex-1 min-w-0 pr-2 pt-0.5 ${isSelected && !isSelectionMode ? 'text-white' : 'text-foreground'}`}>
-                                      {conv.contact_name || conv.contact_phone}
-                                  </span>
+                             {/* 1. Nombre, Cerebrito y Hora */}
+                              <div className="flex justify-between items-start mb-0.5 w-full min-w-0">
+                                  <div className="flex items-center min-w-0 pr-2">
+                                      <span className={`font-semibold truncate text-[15px] ${isSelected && !isSelectionMode ? 'text-primary dark:text-primary' : 'text-foreground'}`}>
+                                          {conv.contact_name || conv.contact_phone}
+                                      </span>
+                                      
+                                      {/* 🔥 EL CEREBRITO (Perfil IA) 🔥 */}
+                                      {conv.ai_profile && (
+                                          <Brain className="w-3.5 h-3.5 text-blue-500 shrink-0 mx-1" title="Cliente Perfilado por IA" />
+                                      )}
+
+                                      {/* 🌡️ EL TERMÓMETRO (NUEVO) */}
+    {conv.lead_score !== null && conv.lead_score !== undefined && (
+        <div className="ml-1 text-[12px] cursor-help" title={`Score de cierre: ${conv.lead_score}%`}>
+            {conv.lead_score < 40 ? '❄️' : conv.lead_score < 75 ? '☀️' : '🔥'}
+        </div>
+    )}
+                                  </div>
                                   
-                                  {/* 🔥 COLUMNA DERECHA: Etiquetas + Hora */}
-                                  <div className="flex flex-col items-end shrink-0 gap-1">
+                                  <div className="flex flex-col items-end shrink-0 gap-1 mt-0.5">
                                       {tab === "RESOLVED" && (conv.status === 'ABANDONED' || conv.status === 'abandoned') && (
                                           <span className="bg-slate-100 text-slate-500 text-[9px] px-1.5 py-0.5 rounded-[4px] border border-slate-200 font-bold uppercase tracking-wider">Descartado</span>
                                       )}
@@ -526,86 +544,70 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
                                           <span className="bg-emerald-50 text-emerald-600 text-[9px] px-1.5 py-0.5 rounded-[4px] border border-emerald-200 font-bold uppercase tracking-wider">Resuelto</span>
                                       )}
                                       
-                                      <span className={`text-[10px] ${isSelected && !isSelectionMode ? 'text-white/70' : 'text-muted-foreground/70'}`}>
+                                      <span className={`text-[11px] font-medium ${isSelected && !isSelectionMode ? 'text-primary/70' : 'text-muted-foreground/60'}`}>
                                           {formatTime(conv.last_activity)}
                                       </span>
                                   </div>
                               </div>
                              
-                            {/* 2. Etiquetas y Estado de Asignación Interno */}
-                             <div className="flex flex-wrap gap-1 mb-1 overflow-hidden h-4.5">
-                                 
-                                 {/* 🔥 ETIQUETA INTERNA (Limpia de Owners) */}
-                                 {(() => {
-                                     const assignedId = conv.assigned_to ? String(conv.assigned_to).trim() : "";
-                                     const currentUserIdStr = String(userId).trim();
+                            {/* 2. Etiquetas y Asignación (Desaparece si no hay) */}
+                             {(hasTags || isAssignedToAgent) && (
+                                 <div className="flex flex-wrap gap-1 mb-1 overflow-hidden">
                                      
-                                     // 1. Si es mío, no muestro etiqueta
-                                     if (assignedId === currentUserIdStr) return null;
-                                     
-                                     // 2. Si no es un "Agente Real" (es decir, es Soporte o null), no muestro etiqueta
-                                     if (!isPeerAgent(assignedId)) return null;
+                                     {isAssignedToAgent && (() => {
+                                         const assignedAgent = agents.find(a => String(a.id) === assignedId);
+                                         if (!assignedAgent) return null;
+                                         const agentRole = (assignedAgent.role || '').toUpperCase();
+                                         if (agentRole === 'OWNER' || agentRole === 'ADMIN') return null;
 
-                                     const assignedAgent = agents.find(a => String(a.id) === assignedId);
-                                     if (!assignedAgent) return null;
+                                         const agentName = assignedAgent.nombre || assignedAgent.name || (assignedAgent.email ? assignedAgent.email.split('@')[0] : "Agente");
+                                         return (
+                                             <span className="text-[9px] px-1.5 py-0.5 rounded-[3px] font-bold border truncate max-w-[90px] flex items-center bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/30 dark:text-violet-300 dark:border-violet-800">
+                                                 👤 {agentName}
+                                             </span>
+                                         );
+                                     })()}
 
-                                     // No mostrar badge para OWNER/ADMIN
-                                     const agentRole = (assignedAgent.role || '').toUpperCase();
-                                     if (agentRole === 'OWNER' || agentRole === 'ADMIN') return null;
-
-                                     const agentName = assignedAgent.nombre || assignedAgent.name || (assignedAgent.email ? assignedAgent.email.split('@')[0] : "Agente");
-                                     
-                                     return (
-                                         <span 
-                                             className="text-[9px] px-1.5 rounded-[3px] font-bold border truncate max-w-[90px] flex items-center" 
-                                             style={{ backgroundColor: isSelected ? 'rgba(255,255,255,0.2)' : '#f3e8ff', color: isSelected ? '#fff' : '#7e22ce', borderColor: isSelected ? 'transparent' : '#e9d5ff' }}
-                                         >
-                                             👤 {agentName}
-                                         </span>
-                                     );
-                                 })()}
-
-                                 {/* 🔥 Etiquetas Oficiales (Deduplicación Extrema) */}
-                                 {conv.tags && conv.tags.length > 0 && (
-                                     <>
-                                         {Array.from(new Set(
-                                             conv.tags
-                                             .filter((t: any) => typeof t === 'string' && t.length < 25) 
-                                             .map((t: string) => {
-                                                 const clean = t.trim().toLowerCase();
-                                                 const found = availableTags?.find(at => at.name.trim().toLowerCase() === clean || at.id === t);
-                                                 return found ? found.name.trim() : t.trim(); 
-                                             })
-                                         )).map((displayName: any) => {
-                                             const tagObj = availableTags?.find(at => at.name.trim() === displayName);
-                                             const color = tagObj?.color || "#888888";
-                                             
-                                             return (
-                                                 <span key={displayName} className="text-[9px] px-1.5 rounded-[3px] font-bold border truncate max-w-[80px]" style={{ backgroundColor: isSelected && !isSelectionMode ? 'rgba(255,255,255,0.2)' : `${color}15`, color: isSelected && !isSelectionMode ? '#fff' : color, borderColor: isSelected && !isSelectionMode ? 'transparent' : `${color}30` }}>
-                                                     {displayName}
-                                                 </span>
-                                             )
-                                         })}
-                                     </>
-                                 )}
-                             </div>
+                                     {hasTags && (
+                                         <>
+                                             {Array.from(new Set(
+                                                 conv.tags
+                                                 .filter((t: any) => typeof t === 'string' && t.length < 25) 
+                                                 .map((t: string) => {
+                                                     const clean = t.trim().toLowerCase();
+                                                     const found = availableTags?.find(at => at.name.trim().toLowerCase() === clean || at.id === t);
+                                                     return found ? found.name.trim() : t.trim(); 
+                                                 })
+                                             )).map((displayName: any) => {
+                                                 const tagObj = availableTags?.find(at => at.name.trim() === displayName);
+                                                 const color = tagObj?.color || "#888888";
+                                                 return (
+                                                     <span key={displayName} className="text-[9px] px-1.5 py-0.5 rounded-[3px] font-bold border truncate max-w-[80px]" style={{ backgroundColor: `${color}15`, color: color, borderColor: `${color}30` }}>
+                                                         {displayName}
+                                                     </span>
+                                                 )
+                                             })}
+                                         </>
+                                     )}
+                                 </div>
+                             )}
 
                              {/* 3. Mensaje / Borrador */}
                              <div className="flex items-center gap-1.5 w-full min-w-0 mt-0.5">
                                  {!conv.last_message_is_incoming && !hasDraft && (
-                                     <div className={`shrink-0 ${isSelected && !isSelectionMode ? 'text-white/80' : 'text-muted-foreground'}`}>
+                                     <div className={`shrink-0 ${isSelected && !isSelectionMode ? 'text-primary/70' : 'text-muted-foreground'}`}>
                                          <SidebarStatus status={conv.last_message_status} />
                                      </div>
                                  )}
                                  
                                  {hasDraft ? (
                                      <p className="text-red-500 italic text-[13px] min-w-0 flex-1">
-                                       Borrador: {truncateText(drafts[conv.id], 20)}
+                                       Borrador: {truncateText(drafts[conv.id], 25)}
                                      </p>
                                  ) : (
-                                    <p className={`text-[13px] min-w-0 flex-1 ${isSelected && !isSelectionMode ? 'text-white/90' : 'text-muted-foreground'}`}>
+                                    <p className={`text-[13px] min-w-0 flex-1 truncate ${isSelected && !isSelectionMode ? 'text-foreground' : 'text-muted-foreground'}`}>
                                       {!conv.last_message_is_incoming && <span className="opacity-70 font-medium mr-1 shrink-0">Tú:</span>}
-                                      {truncateText(formatPreview(conv.last_message), 25)}
+                                      {truncateText(formatPreview(conv.last_message), 30)}
                                     </p>
                                  )}
                              </div>
@@ -618,8 +620,7 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
             </div>
           </ScrollArea>
 
-          {/* 🔥 BARRA FLOTANTE DE ACCIONES MASIVAS */}
-         {/* 🔥 BARRA FLOTANTE DE ACCIONES MASIVAS */}
+          {/* BARRA FLOTANTE DE ACCIONES MASIVAS */}
           {isSelectionMode && selectedChats.length > 0 && (
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[90%] bg-popover/95 backdrop-blur-md border border-border shadow-2xl rounded-2xl px-4 py-3 flex items-center justify-between z-50 animate-in slide-in-from-bottom-5">
               <span className="text-sm font-bold bg-primary text-primary-foreground h-6 w-6 flex items-center justify-center rounded-full shrink-0">
@@ -627,8 +628,6 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
               </span>
               
               <div className="flex gap-2">
-                
-                {/* BOTÓN PRINCIPAL DINÁMICO SEGÚN LA PESTAÑA */}
                 {tab === "RESOLVED" ? (
                   <Button size="sm" variant="secondary" onClick={() => handleBulkAction('open')} disabled={isProcessingBulk} className="h-8 cursor-pointer hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-900/50">
                     {isProcessingBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4 mr-1.5" />}
@@ -646,7 +645,6 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
                   </Button>
                 )}
                 
-                {/* BOTÓN ETIQUETAR (CON MENÚ DESPLEGABLE) */}
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button size="sm" variant="outline" className="h-8 cursor-pointer" title="Etiquetar">
@@ -683,7 +681,6 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
                   </PopoverContent>
                 </Popover>
 
-                {/* BOTÓN ASIGNAR (Lo dejamos preparado visualmente) */}
                 <Button size="sm" variant="outline" className="h-8 cursor-pointer" title="Asignar a agente" onClick={() => setIsAssignModalOpen(true)}>
                   <UserPlus className="w-4 h-4" />
                 </Button>
@@ -692,7 +689,8 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
           )}
 
       </div>
-      {/* 🚀 MODAL DE ASIGNACIÓN DE AGENTES */}
+      
+      {/* MODAL DE ASIGNACIÓN DE AGENTES */}
       <Dialog open={isAssignModalOpen} onOpenChange={setIsAssignModalOpen}>
         <DialogContent className="sm:max-w-md border-border bg-background">
           <DialogHeader>
@@ -707,10 +705,8 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
               <Label className="text-xs font-bold uppercase text-muted-foreground">Equipo Disponible</Label>
               <div className="grid grid-cols-2 gap-2 max-h-[150px] overflow-y-auto no-scrollbar p-1">
                 {agents
-                  // 🔥 1. FILTRO: Sacamos al usuario actual Y al Dueño (OWNER)
                   .filter(a => a.id !== userId && a.role !== 'OWNER')
                   .map(agent => {
-                    // 🔥 2. SALVAVIDAS: Si no viene "nombre", buscamos "name" o usamos el email
                     const agentName = agent.nombre || agent.name || (agent.email ? agent.email.split('@')[0] : "Agente");
                     const initial = agentName.charAt(0).toUpperCase();
 
@@ -725,7 +721,6 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-semibold text-sm truncate">{agentName}</p>
-                          {/* Opcional: Mostramos el rol pequeñito abajo */}
                           <p className="text-[10px] text-muted-foreground capitalize">{agent.role?.toLowerCase() || 'Agente'}</p>
                         </div>
                         {selectedAgentToAssign === agent.id && <Check className="w-4 h-4 text-violet-500 shrink-0" />}
@@ -735,9 +730,6 @@ const activeFiltersCount = selectedLines.length + selectedTags.length + selected
                 
                 {agents.filter(a => a.id !== userId && a.role !== 'OWNER').length === 0 && (
                   <p className="text-xs text-muted-foreground col-span-2 text-center py-4">No hay agentes disponibles para transferir.</p>
-                )}
-                {agents.length <= 1 && (
-                  <p className="text-xs text-muted-foreground col-span-2 text-center py-4">No hay otros agentes disponibles en tu equipo.</p>
                 )}
               </div>
             </div>

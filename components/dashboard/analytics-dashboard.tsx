@@ -5,7 +5,11 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { motion } from "framer-motion"
 import { 
   DollarSign, TrendingUp, Users, MessageSquare, Globe, MapPin, Smartphone, 
-  Calendar, Filter, ArrowUpRight, ArrowDownRight, Eye, MousePointerClick, Percent
+  Calendar, Filter, ArrowUpRight, ArrowDownRight, Eye, MousePointerClick, Percent,
+  Badge,
+  Bot,
+  User,
+  PackageSearch
 } from "lucide-react"
 import { 
   AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, 
@@ -80,9 +84,17 @@ interface AnalyticsDashboardProps {
   goalData: { goal: number, currentTotal: number, trendPercentage: number }
   monthlyHistory: any[]
   avgResponseTime: string // 
+  ecommerceData?: {
+    aiAmount: number,
+    humanAmount: number,
+    aiPercentage: number,
+    humanPercentage: number,
+    topProducts: any[]
+  }
+  hasEcommerceAddon: boolean
 }
 
-export function AnalyticsDashboard({ kpis, dailySales, recentSales, chatMetrics, landings, geoData, deviceData, goalData, monthlyHistory, avgResponseTime }: AnalyticsDashboardProps) {
+export function AnalyticsDashboard({ kpis, dailySales, recentSales, chatMetrics, landings, geoData, deviceData, goalData, monthlyHistory, avgResponseTime, ecommerceData, hasEcommerceAddon  }: AnalyticsDashboardProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -91,7 +103,8 @@ export function AnalyticsDashboard({ kpis, dailySales, recentSales, chatMetrics,
 
   const [activeTab, setActiveTab] = useState<"ventas" | "chat" | "landings">("ventas")
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null)
-
+   
+  
   // =========================================================================
   // 🔥 INICIO DEL BLOQUE DE FECHAS (Anti-Lag y Anti-Espejo)
   // =========================================================================
@@ -426,54 +439,108 @@ export function AnalyticsDashboard({ kpis, dailySales, recentSales, chatMetrics,
               </div>
             </GlassCard>
 
-            {/* Recent Sales */}
-            <div className="grid gap-6 lg:grid-cols-2">
-              <GlassCard delay={0.2}>
-                <div className="p-6">
-                  <h3 className="text-lg font-bold text-slate-800 mb-4">Ultimas Ventas</h3>
+          
+           {/* 🔥 NUEVO: E-COMMERCE METRICS DINÁMICO */}
+            <div className={`grid gap-6 ${ecommerceData?.topProducts && ecommerceData.topProducts.length > 0 ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
+              
+              {/* Gráfico IA vs Humanos */}
+              <GlassCard delay={0.2} className="flex flex-col">
+                <div className="p-6 flex-1 flex flex-col justify-center">
+                  <p className="text-slate-500 font-bold text-xs uppercase tracking-wider mb-4">Cierres por Origen</p>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <Bot className="w-4 h-4 text-blue-500" /> IA (OCR)
+                      </div>
+                      <p className="text-2xl font-black text-blue-600">${ecommerceData?.aiAmount?.toLocaleString('es-AR') || "0"}</p>
+                    </div>
+                    <div className="h-10 w-px bg-slate-200"></div>
+                    <div className="space-y-1 text-right">
+                      <div className="flex items-center justify-end gap-2 text-slate-700">
+                        <User className="w-4 h-4 text-orange-500" /> Humanos
+                      </div>
+                      <p className="text-2xl font-black text-orange-600">${ecommerceData?.humanAmount?.toLocaleString('es-AR') || "0"}</p>
+                    </div>
+                  </div>
+                  
+                  {/* Barra de progreso visual */}
+                  <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden flex shadow-inner">
+                    <div className="h-full bg-gradient-to-r from-blue-400 to-blue-600" style={{ width: `${ecommerceData?.aiPercentage || 0}%` }}></div>
+                    <div className="h-full bg-gradient-to-r from-orange-400 to-orange-500" style={{ width: `${ecommerceData?.humanPercentage || 0}%` }}></div>
+                  </div>
+                  <div className="flex justify-between mt-2 text-[10px] font-bold text-slate-400">
+                     <span>{ecommerceData?.aiPercentage || 0}% Automatizado</span>
+                     <span>{ecommerceData?.humanPercentage || 0}% Manual</span>
+                  </div>
+                </div>
+              </GlassCard>
+
+              {/* 🔥 TOP VENDIDOS (SOLO SE MUESTRA SI HAY PRODUCTOS) */}
+              {hasEcommerceAddon && ecommerceData?.topProducts && ecommerceData.topProducts.length > 0 && (
+                <GlassCard delay={0.25}>
+                  <div className="p-6">
+                    <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                       <PackageSearch className="w-5 h-5 text-indigo-500" /> Top Vendidos
+                    </h3>
+                    <div className="space-y-4">
+                      {ecommerceData.topProducts.map((prod: any, idx: number) => (
+                        <div key={idx} className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold flex items-center justify-center text-xs shadow-sm">
+                            {idx + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-sm text-slate-700 truncate">{prod.nombre}</p>
+                            <p className="text-[10px] text-slate-400 font-mono">{prod.sku}</p>
+                          </div>
+                          <div className="text-right">
+                            <Badge variant="secondary" className="bg-indigo-50 text-indigo-700 font-black">{prod.cantidad}x</Badge>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </GlassCard>
+              )}
+
+              {/* Recent Sales (Actualizado con Origen y Detalles) */}
+              <GlassCard delay={0.3} className="flex flex-col">
+                <div className="p-6 flex-1">
+                  <h3 className="text-lg font-bold text-slate-800 mb-4">Últimas Transacciones</h3>
                   {recentSales.length === 0 ? (
                     <p className="text-center py-8 text-slate-500">Sin ventas recientes</p>
                   ) : (
                     <div className="space-y-3">
-                      {recentSales.map((sale, i) => (
-                        <motion.div 
-                          key={sale.id} 
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: 0.3 + i * 0.1 }}
-                          className="flex items-center justify-between p-3 rounded-xl bg-white/50 hover:bg-white/80 transition-colors"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-white font-bold text-sm">
+                      {recentSales.map((sale: any, i: number) => (
+                        <motion.div key={sale.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.3 + i * 0.1 }} className="flex items-center justify-between p-3 rounded-xl bg-white/50 hover:bg-white/80 transition-colors border border-white/60 shadow-sm">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-inner ${sale.origen === 'ia' ? 'bg-gradient-to-br from-blue-400 to-blue-600' : 'bg-gradient-to-br from-orange-400 to-rose-500'}`}>
                               {sale.contact_name?.charAt(0) || "?"}
                             </div>
-                            <div>
-                              <p className="font-medium text-slate-800">{sale.contact_name || "Sin nombre"}</p>
-                              <p className="text-xs text-slate-500">{new Date(sale.created_at).toLocaleDateString()}</p>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-bold text-sm text-slate-800 truncate">{sale.contact_name || "Sin nombre"}</p>
+                              
+                              {/* 🔥 NUEVO: DETALLES DE LA VENTA (El letrerito) */}
+                              {sale.descripcion && sale.descripcion.includes(':') && (
+                                <p className="text-[10px] font-medium text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded w-fit my-0.5 truncate max-w-[150px] border border-violet-100">
+                                  {sale.descripcion.split(':')[1].trim()} 
+                                </p>
+                              )}
+
+                              <div className="flex items-center gap-2 mt-0.5">
+                                 {sale.origen === 'ia' ? (
+                                    <span className="flex items-center text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 rounded"><Bot className="w-3 h-3 mr-1"/> IA</span>
+                                 ) : (
+                                    <span className="flex items-center text-[10px] font-bold text-orange-600 bg-orange-50 px-1.5 rounded"><User className="w-3 h-3 mr-1"/> Humano</span>
+                                 )}
+                                 <span className="text-[10px] text-slate-400">{new Date(sale.created_at).toLocaleDateString()}</span>
+                              </div>
                             </div>
                           </div>
-                          <span className="text-lg font-bold text-emerald-600">${Number(sale.amount).toLocaleString()}</span>
+                          <span className="text-base font-black text-emerald-600 shrink-0 ml-2">+${Number(sale.amount).toLocaleString()}</span>
                         </motion.div>
                       ))}
                     </div>
                   )}
-                </div>
-              </GlassCard>
-
-              <GlassCard delay={0.3}>
-                <div className="p-6">
-                  <h3 className="text-lg font-bold text-slate-800 mb-4">Volumen de Ventas</h3>
-                  <div className="h-[250px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={salesChartData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" strokeOpacity={0.5} />
-                        <XAxis dataKey="date" tick={{ fill: '#64748B', fontSize: 10 }} axisLine={false} tickLine={false} />
-                        <YAxis tick={{ fill: '#64748B', fontSize: 12 }} axisLine={false} tickLine={false} />
-                        <RechartsTooltip content={<CustomTooltip />} />
-                        <Bar dataKey="ventas" fill="#6366F1" radius={[4, 4, 0, 0]} name="Ventas" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
                 </div>
               </GlassCard>
             </div>

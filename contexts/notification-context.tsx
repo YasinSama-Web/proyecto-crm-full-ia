@@ -10,6 +10,7 @@ interface NotificationData {
   message: Mensaje | any
   timestamp: string
   isPayment?: boolean
+  isFurious?: boolean // 🔥 NUEVO: Identificador de alerta roja
 }
 
 interface NotificationContextType {
@@ -18,6 +19,7 @@ interface NotificationContextType {
   unreadPaymentsCount: number
   addNotification: (notification: NotificationData) => void
   clearNotifications: () => void
+  clearAllNotifications: () => void // 🔥 NUEVO: Función para limpiar todo
   clearNotificationsByConversation: (conversationId: string) => void
   syncOfflineNotifications: (notifications: NotificationData[]) => void
 }
@@ -52,12 +54,12 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     setNotifications((prev) => {
       const currentNotifications = Array.isArray(prev) ? prev : []
       
-      // Evitar duplicados (Si es pago, NO bloqueamos por tiempo para asegurar que entre)
-      if (!notification.isPayment) {
+      // Evitar duplicados (Si es pago o furioso, NO bloqueamos por tiempo para asegurar que entre)
+      if (!notification.isPayment && !notification.isFurious) {
           const isDuplicate = currentNotifications.some(
             (n) =>
               n.conversationId === notification.conversationId &&
-              !n.isPayment && // Solo bloqueamos duplicados de texto
+              !n.isPayment && !n.isFurious &&
               Math.abs(new Date(n.timestamp).getTime() - new Date(notification.timestamp).getTime()) < 10000
           )
           if (isDuplicate) return currentNotifications
@@ -72,15 +74,14 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       const current = Array.isArray(prev) ? prev : []
       const merged = [...offlineNotifs, ...current]
       
-      // Filtramos para no tener 2 notificaciones del mismo chat, nos quedamos con la más reciente
       const unique = Array.from(new Map(merged.map(item => [item.conversationId, item])).values())
       
-      // Ordenamos por fecha (más recientes primero) y guardamos máximo 50
       return unique.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 50)
     })
   }
 
   const clearNotifications = () => setNotifications([])
+  const clearAllNotifications = () => setNotifications([]) // 🔥 La función que faltaba
 
   const clearNotificationsByConversation = (conversationId: string) => {
     setNotifications((prev) => prev.filter((n) => n.conversationId !== conversationId))
@@ -88,9 +89,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   const unreadCount = notifications.length
   const unreadPaymentsCount = notifications.filter(n => n.isPayment).length;
-return (
+
+  return (
     <NotificationContext.Provider value={{ 
         notifications, unreadCount, unreadPaymentsCount, addNotification, clearNotifications, 
+        clearAllNotifications, // 🔥 Exportada
         clearNotificationsByConversation, syncOfflineNotifications 
     }}>
       {children}

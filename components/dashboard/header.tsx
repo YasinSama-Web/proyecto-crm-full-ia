@@ -18,12 +18,11 @@ export function DashboardHeader() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [showCreditsModal, setShowCreditsModal] = useState(false)
   
-  // 🔥 ESTADOS PARA LOS CRÉDITOS Y ROLES
   const [isLowCredits, setIsLowCredits] = useState(false)
-  const [isAdminOrOwner, setIsAdminOrOwner] = useState(true) // Por defecto true para evitar parpadeos al dueño
+  const [isAdminOrOwner, setIsAdminOrOwner] = useState(true) 
   
-  const { notifications, unreadCount, clearNotificationsByConversation } = useNotifications()
-  // const clearAllNotifications = ... // Si la tienes en el context extráela aquí
+  // 🔥 Extraemos clearAllNotifications
+  const { notifications, unreadCount, clearNotificationsByConversation, clearAllNotifications } = useNotifications()
   const router = useRouter()
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
@@ -36,8 +35,6 @@ export function DashboardHeader() {
   
   useEffect(() => {
     setMounted(true)
-    
-    // 🔥 Buscamos Auth (para saber el rol) y Créditos en paralelo
     Promise.all([
       fetch('/api/auth/me?t=' + Date.now()).then(res => res.json()).catch(() => ({})),
       fetch('/api/user/credits?t=' + Date.now()).then(res => res.json()).catch(() => ({}))
@@ -52,11 +49,9 @@ export function DashboardHeader() {
          setCreditosPlan(saldoPlan);
          setCreditosExtra(saldoExtra);
          
-         // Lógica de alerta roja depende del rol
          if (isPrivileged) {
              setIsLowCredits((saldoPlan + saldoExtra) < 20);
          } else {
-             // Al agente solo le importa su saldo extra asignado
              setIsLowCredits((saldoPlan + saldoExtra) < 20);
          }
     });
@@ -147,7 +142,6 @@ export function DashboardHeader() {
       </div>
 
       <div className="flex items-center gap-3">
-
         <div className={`flex items-center gap-1.5 p-1 border rounded-full shadow-sm transition-colors duration-300
             ${isLowCredits 
               ? 'bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-900/50' 
@@ -155,7 +149,6 @@ export function DashboardHeader() {
           `}>
             
             {isAdminOrOwner ? (
-              // 🔥 VISTA DE DUEÑO / ADMIN: Ve el desglose completo y puede comprar
               <>
                 <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold shadow-sm transition-colors
                   ${isLowCredits 
@@ -186,7 +179,6 @@ export function DashboardHeader() {
                 </button>
               </>
             ) : (
-              // 🔥 VISTA DE AGENTE: Solo ve su propio monedero (extra) y no puede comprar
               <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold shadow-sm transition-colors
                 ${isLowCredits 
                   ? 'bg-white dark:bg-red-900/40 text-red-700 dark:text-red-300' 
@@ -246,6 +238,18 @@ export function DashboardHeader() {
                       const displayName = isPhoneNumber ? `+${contactName}` : contactName
                       const messageContent = formatNotificationContent(notification.message)
 
+                      // 🔥 LÓGICA DE COLORES DEL AVATAR SEGÚN EL TIPO
+                      let avatarBg = "bg-gradient-to-br from-blue-500 to-violet-600 shadow-blue-500/20";
+                      let avatarText = displayName[0]?.toUpperCase() || "?";
+                      
+                      if (notification.isPayment) {
+                          avatarBg = "bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-emerald-500/20";
+                          avatarText = "💸";
+                      } else if (notification.isFurious) {
+                          avatarBg = "bg-gradient-to-br from-red-500 to-orange-600 shadow-red-500/20";
+                          avatarText = "🚨";
+                      }
+
                       return (
                         <motion.div
                           initial={{ opacity: 0, x: -10 }}
@@ -255,9 +259,8 @@ export function DashboardHeader() {
                           className="group flex items-start gap-4 p-4 hover:bg-white/5 cursor-pointer transition-colors relative"
                           onClick={() => handleNotificationClick(notification.conversationId)}
                         >
-                          {/* Avatar Gradiente */}
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-violet-600 shrink-0 shadow-lg shadow-blue-500/20 text-white font-bold text-sm">
-                            {displayName[0]?.toUpperCase() || "?"}
+                          <div className={`flex h-10 w-10 items-center justify-center rounded-full shrink-0 shadow-lg text-white font-bold text-sm ${avatarBg}`}>
+                            {avatarText}
                           </div>
 
                           <div className="flex-1 min-w-0">
@@ -268,16 +271,13 @@ export function DashboardHeader() {
                               </span>
                             </div>
                             
-                            {!isPhoneNumber && notification.contactName && (
-                              <p className="text-xs text-blue-300/80 mb-1">+{notification.contactName}</p>
-                            )}
+                            {/* 🔥 SE ELIMINÓ EL PÁRRAFO DUPLICADO DEL NOMBRE AQUÍ */}
                             
-                            <p className="text-sm text-slate-300 line-clamp-2 leading-snug group-hover:text-white transition-colors">
+                            <p className="text-sm text-slate-300 line-clamp-2 leading-snug group-hover:text-white transition-colors mt-1">
                                 {messageContent}
                             </p>
                           </div>
 
-                          {/* Botón borrar individual */}
                           <Button
                             variant="ghost"
                             size="icon"
@@ -290,8 +290,7 @@ export function DashboardHeader() {
                             <Trash2 className="h-4 w-4" />
                           </Button>
                           
-                          {/* Indicador de "No leído" azul */}
-                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          <div className={`absolute left-0 top-0 bottom-0 w-1 opacity-0 group-hover:opacity-100 transition-opacity ${notification.isFurious ? 'bg-red-500' : notification.isPayment ? 'bg-emerald-500' : 'bg-blue-500'}`} />
                         </motion.div>
                       )
                     })}
@@ -303,9 +302,12 @@ export function DashboardHeader() {
                   <Button
                     variant="ghost"
                     className="w-full text-xs text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      // if (clearAllNotifications) clearAllNotifications() 
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      clearAllNotifications(); // Limpia la pantalla
+                      try {
+                          await fetch('/api/conversations/read-all', { method: 'POST' }); // Limpia la BD
+                      } catch(err) {}
                     }}
                   >
                     <CheckCheck className="mr-2 h-4 w-4" />

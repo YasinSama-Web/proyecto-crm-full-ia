@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     // Esto es VITAL para que el panel derecho encuentre el ID al vuelo
     if (phone) {
         contacts = await sql`
-            SELECT id, phone, name, tags, pipeline_stage_id, notes, deal_value
+            SELECT id, phone, name, tags, pipeline_stage_id, ai_profile, lead_score, lead_score_reason, notes, deal_value
             FROM "Contact"
             WHERE usuario_id = ${rootOwnerId} AND phone = ${phone}
             LIMIT 1
@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
     // 🔥 PRIORIDAD 2: Búsqueda por texto y tag
     else if (search && tag) {
       contacts = await sql`
-        SELECT id, phone, name, created_at, last_message, tags, notes, is_group, deal_value, pipeline_stage_id
+        SELECT id, phone, name, created_at, last_message, tags, notes, is_group, deal_value,ai_profile, lead_score, lead_score_reason, pipeline_stage_id
         FROM "Contact"
         WHERE usuario_id = ${rootOwnerId}
           AND is_group = false 
@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
     // 🔥 PRIORIDAD 3: Solo búsqueda por texto
     else if (search) {
       contacts = await sql`
-        SELECT id, phone, name, created_at, last_message, tags, notes, is_group, deal_value, pipeline_stage_id
+        SELECT id, phone, name, created_at, last_message, tags, notes, is_group, deal_value,ai_profile, lead_score, lead_score_reason, pipeline_stage_id
         FROM "Contact"
         WHERE usuario_id = ${rootOwnerId}
           AND is_group = false
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
     // 🔥 PRIORIDAD 4: Solo filtro por tag
     else if (tag) {
       contacts = await sql`
-        SELECT id, phone, name, created_at, last_message, tags, notes, is_group, deal_value, pipeline_stage_id
+        SELECT id, phone, name, created_at, last_message, tags, notes, is_group, deal_value,ai_profile, lead_score, lead_score_reason, pipeline_stage_id
         FROM "Contact"
         WHERE usuario_id = ${rootOwnerId}
           AND is_group = false
@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
     // 🔥 PRIORIDAD 5: Traer todos (Default)
     else {
       contacts = await sql`
-        SELECT id, phone, name, created_at, last_message, tags, notes, is_group, deal_value, pipeline_stage_id
+        SELECT id, phone, name, created_at, last_message, tags, notes, is_group, deal_value,ai_profile, lead_score, lead_score_reason, pipeline_stage_id
         FROM "Contact"
         WHERE usuario_id = ${rootOwnerId}
           AND is_group = false

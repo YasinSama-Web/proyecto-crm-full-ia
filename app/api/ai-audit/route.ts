@@ -17,7 +17,6 @@ export async function GET(req: Request) {
     const range = searchParams.get("range") || "7d" // today, yesterday, 7d, 30d, all
 
     // 1. Total gastado en el período
-    // Usamos u.owner_id en vez de u."rootOwnerId" y pasamos el filtro de fecha directo al WHERE
     const totalQuery = await sql`
         SELECT COALESCE(SUM(credits_cost), 0) as total
         FROM ia_usage_logs l
@@ -80,7 +79,7 @@ export async function GET(req: Request) {
             (${range} = 'all')
         )
         ORDER BY l.created_at DESC
-        LIMIT 15
+        LIMIT 200
     `
 
     return NextResponse.json({

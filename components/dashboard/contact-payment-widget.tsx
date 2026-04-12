@@ -184,6 +184,11 @@ useEffect(() => {
                     <div>
                       {/* 🔥 MOSTRAMOS EL TÍTULO DINÁMICO */}
                       <p className="text-sm font-medium text-slate-700">{paymentTitle}</p>
+                      {p.content && p.content.includes(':') && (
+                        <p className="text-[11px] font-medium text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded w-fit my-0.5 truncate max-w-[180px]">
+                          {p.content.split(':')[1].trim()} 
+                        </p>
+                      )}
                       <p className="text-xs text-slate-400 capitalize">
                         {safeLocaleDate(p.created_at)}
                       </p>

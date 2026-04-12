@@ -40,11 +40,10 @@ async function getDailySales(rootOwnerId: string, startDate: string, endDate: st
   } catch (e) { return [] }
 }
 
-// 3. VENTAS RECIENTES (Toda la empresa)
 async function getRecentSales(rootOwnerId: string, startDate: string, endDate: string) {
   try {
     return await sql`
-      SELECT v.id, v.amount, v.created_at, c.name as contact_name, c.phone as contact_phone
+      SELECT v.id, v.amount, v.created_at, v.origen, v.descripcion, c.name as contact_name, c.phone as contact_phone
       FROM ventas v
       JOIN "Contact" c ON v.contact_id = c.id
       WHERE v.usuario_id IN (SELECT id FROM usuarios WHERE owner_id = ${rootOwnerId} OR id = ${rootOwnerId}) 
@@ -177,6 +176,65 @@ async function getGoalData(rootOwnerId: string) {
   } catch (e) { return { goal: 1000000, currentTotal: 0, trendPercentage: 0 } }
 }
 
+// 🔥 NUEVO: MÉTRICAS E-COMMERCE (IA vs Humano y Top Productos)
+async function getEcommerceMetrics(rootOwnerId: string, startDate: string, endDate: string) {
+  try {
+    const metricsQuery = await sql`
+      SELECT 
+        COALESCE(SUM(CASE WHEN origen = 'ia' THEN amount ELSE 0 END), 0) as ai_amount,
+        COALESCE(SUM(CASE WHEN origen != 'ia' OR origen IS NULL THEN amount ELSE 0 END), 0) as human_amount
+      FROM ventas 
+      WHERE usuario_id IN (SELECT id FROM usuarios WHERE owner_id = ${rootOwnerId} OR id = ${rootOwnerId}) 
+      AND created_at >= ${startDate} AND created_at <= ${endDate}
+    `;
+
+    const aiAmount = Number(metricsQuery[0]?.ai_amount || 0);
+    const humanAmount = Number(metricsQuery[0]?.human_amount || 0);
+    const totalAmount = aiAmount + humanAmount;
+    const aiPercentage = totalAmount > 0 ? Math.round((aiAmount / totalAmount) * 100) : 0;
+    const humanPercentage = totalAmount > 0 ? 100 - aiPercentage : 0;
+
+    // Calcular Top Productos
+    const ventasConProductos = await sql`
+      SELECT productos_skus FROM ventas 
+      WHERE usuario_id IN (SELECT id FROM usuarios WHERE owner_id = ${rootOwnerId} OR id = ${rootOwnerId}) 
+      AND productos_skus IS NOT NULL AND created_at >= ${startDate} AND created_at <= ${endDate}
+    `;
+
+    const productCounts: Record<string, number> = {};
+    ventasConProductos.forEach((venta: any) => {
+      try {
+        const skus = typeof venta.productos_skus === 'string' ? JSON.parse(venta.productos_skus) : venta.productos_skus;
+        if (Array.isArray(skus)) {
+          skus.forEach((item: string) => {
+            const partes = item.split('x ');
+            if (partes.length === 2) {
+              const cantidad = parseInt(partes[0].trim()) || 1;
+              const sku = partes[1].trim();
+              productCounts[sku] = (productCounts[sku] || 0) + cantidad;
+            }
+          });
+        }
+      } catch (e) {} 
+    });
+
+    const topSkus = Object.entries(productCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    let topProducts: any[] = [];
+    if (topSkus.length > 0) {
+      const justSkus = topSkus.map(t => t[0]);
+      const dbProducts = await sql`SELECT sku, nombre FROM productos WHERE usuario_id = ${rootOwnerId} AND sku = ANY(${justSkus})`;
+      topProducts = topSkus.map(([sku, cantidad]) => {
+        const prod = dbProducts.find((p: any) => p.sku === sku);
+        return { sku, nombre: prod ? prod.nombre : 'Producto Desconocido', cantidad };
+      });
+    }
+
+    return { aiAmount, humanAmount, aiPercentage, humanPercentage, topProducts };
+  } catch (error) {
+    return { aiAmount: 0, humanAmount: 0, aiPercentage: 0, humanPercentage: 0, topProducts: [] };
+  }
+}
+
 // 8. HISTORIAL DE METAS VS REALIDAD (Toda la empresa)
 async function getMonthlyHistory(rootOwnerId: string) {
   try {
@@ -221,7 +279,10 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: { 
   const fromStr = searchParams.from || toStr; 
   const startDate = `${fromStr}T00:00:00-03:00`;
   const endDate = `${toStr}T23:59:59-03:00`;
-
+  const ecommerceData = await getEcommerceMetrics(user.rootOwnerId, startDate, endDate); 
+  const userQuery = await sql`SELECT addon_ecommerce FROM usuarios WHERE id = ${user.rootOwnerId}`;
+  const tieneEcommerce = userQuery[0]?.addon_ecommerce || false;
+  
   const [kpis, goalData, monthlyHistory, avgResponseTime] = await Promise.all([
     getKPIs(user.rootOwnerId, startDate, endDate),
     getGoalData(user.rootOwnerId),
@@ -253,6 +314,8 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: { 
       goalData={goalData}
       monthlyHistory={monthlyHistory}
       avgResponseTime={avgResponseTime} 
+      ecommerceData={ecommerceData}
+      hasEcommerceAddon={tieneEcommerce} 
     />
   )
 }

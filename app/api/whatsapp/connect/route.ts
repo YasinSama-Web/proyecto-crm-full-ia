@@ -19,7 +19,7 @@ export async function POST(req: Request) {
       )
     }
 
-    const serverUrl = process.env.WHATSAPP_SERVER_URL
+    const serverUrl = process.env.NEXT_PUBLIC_WHATSAPP_SERVER_URL
     const secret = process.env.WHATSAPP_SECRET
 
     if (!serverUrl || !secret) {

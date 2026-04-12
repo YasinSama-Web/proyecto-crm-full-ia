@@ -9,9 +9,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ conv
     const user = await requireAuth(request)
     const { conversationId } = await params 
 
-    // 🔥 SEGURIDAD ACTIVADA: Filtramos por rootOwnerId para que nadie vea chats ajenos
+    // 🔥 MAGIA: Hacemos el JOIN con "Contact" para que el ChatView siempre tenga el cerebrito y el termómetro
     const conversation = await sql`
-      SELECT c.* FROM conversaciones c
+      SELECT 
+        c.*,
+        cont.ai_profile,
+        cont.lead_score,
+        cont.lead_score_reason
+      FROM conversaciones c
+      LEFT JOIN "Contact" cont ON c.contact_phone = cont.phone AND cont.usuario_id = c.usuario_id
       WHERE c.id = ${conversationId} 
       AND c.usuario_id = ${user.rootOwnerId} 
     `
@@ -34,7 +40,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ co
     const { conversationId } = await params
     
     const body = await request.json()
-    // 🔥 Agregamos bot_enabled a la desestructuración
     const { contact_name, is_conversion, monto_conversion, unread_count, status, bot_enabled } = body
 
     // Primero verificamos que la conversación pertenezca al usuario
@@ -57,11 +62,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ co
             RETURNING *
         `
     } 
-    // 2. 🔥 Cambiar estado Y/O encender/apagar el bot Y AUTO-ASIGNAR
+    // 2. Cambiar estado Y/O encender/apagar el bot Y AUTO-ASIGNAR
     else if (status !== undefined || bot_enabled !== undefined) {
         
         if (status === "OPEN") {
-            // Si el agente atiende el chat, SE LO ASIGNAMOS A ÉL (user.id)
             result = await sql`
                 UPDATE conversaciones 
                 SET 
@@ -72,8 +76,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ co
                 RETURNING *
             `
         } else {
-            // Si archiva (RESOLVED), mantiene el chat en su historial.
-            // PERO si lo manda a la IA (PENDING), liberamos el chat (assigned_to = NULL)
             result = await sql`
                 UPDATE conversaciones 
                 SET 
@@ -85,7 +87,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ co
             `
         }
     }
-    // 3. Actualizar datos de contacto/venta (¡Aquí faltaba el else!)
+    // 3. Actualizar datos de contacto/venta
     else {
         if (contact_name) {
              await sql`UPDATE conversaciones SET contact_name = ${contact_name} WHERE id = ${conversationId}`
@@ -98,12 +100,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ co
                 WHERE id = ${conversationId}
              `
         }
-        
-        // Retornamos el objeto actualizado final
-        result = await sql`SELECT * FROM conversaciones WHERE id = ${conversationId}`
     }
 
-    return NextResponse.json(result && result.length > 0 ? result[0] : { success: true })
+    // 🔥 EL PARCHE CRÍTICO DE PERSISTENCIA:
+    // Retornamos el objeto actualizado final HACIENDO EL JOIN OTRA VEZ
+    // Así, si el Frontend cambia un estado y sobreescribe su caché, ¡no borra los datos de la IA!
+    const finalUpdatedResult = await sql`
+      SELECT 
+        c.*,
+        cont.ai_profile,
+        cont.lead_score,
+        cont.lead_score_reason
+      FROM conversaciones c
+      LEFT JOIN "Contact" cont ON c.contact_phone = cont.phone AND cont.usuario_id = c.usuario_id
+      WHERE c.id = ${conversationId}
+    `
+
+    return NextResponse.json(finalUpdatedResult && finalUpdatedResult.length > 0 ? finalUpdatedResult[0] : { success: true })
 
   } catch (error) {
     console.error("Error updating conversation:", error)

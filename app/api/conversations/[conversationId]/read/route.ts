@@ -37,7 +37,8 @@ export async function POST(
     await sql`
       UPDATE conversaciones 
       SET unread_count = 0,
-      unread_ia_payment = false
+      unread_ia_payment = false,
+      unread_ia_furious = false
       WHERE id = ${conversationId}
     `
 

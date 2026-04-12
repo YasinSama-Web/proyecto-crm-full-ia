@@ -7,7 +7,8 @@ import {
   MessageSquare, Smartphone, Globe, BarChart3, Settings, Home,
   Users, LogOut, UsersRound, Bot, ClipboardList, TrendingUp,
   Megaphone, CreditCard, HelpCircle, ChevronLeft, ChevronRight, ShieldCheck,
-  Zap, Handshake, Tag, ChevronDown, Rocket, BrainCircuit, Settings2
+  Zap, Handshake, Tag, ChevronDown, Rocket, BrainCircuit, Settings2,
+  ShoppingBag, Lock
 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
@@ -18,6 +19,7 @@ interface UserWithPermissions {
   nombre: string
   email: string
   role: string
+  addon_ecommerce?: boolean // 🔥 AÑADIMOS EL ADDON AQUÍ
   permissions: {
     tier: string
     features?: Record<string, boolean>
@@ -28,7 +30,7 @@ interface UserWithPermissions {
 const navigationGroups = [
   {
     id: "main",
-    isMain: true, // Se muestran sueltos, sin acordeón
+    isMain: true,
     items: [
       { name: "Dashboard", href: "/dashboard", icon: Home },
       { name: "Mensajes", href: "/dashboard/messages", icon: MessageSquare, requiresFeature: "messages" },
@@ -41,6 +43,7 @@ const navigationGroups = [
     title: "Ventas & Crecimiento",
     icon: Rocket,
     items: [
+      { name: "Productos", href: "/dashboard/products", icon: ShoppingBag, requiresFeature: "ecommerce" },
       { name: "Ventas", href: "/dashboard/sales", icon: Handshake, requiresFeature: "sales" },
       { name: "Campañas", href: "/dashboard/campaigns", icon: Megaphone, requiresFeature: "campaigns" },
       { name: "Marketing", href: "/dashboard/marketing", icon: TrendingUp, requiresFeature: "marketing" },
@@ -86,12 +89,17 @@ export function DashboardSidebar() {
   const [loggingOut, setLoggingOut] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState(false)
   
-  // Estado para controlar qué grupos están abiertos
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
     growth: false, ai: false, admin: false
   })
 
-  const { unreadCount, unreadPaymentsCount } = useNotifications()
+  // 🔥 TRAEMOS EL ARRAY COMPLETO DE NOTIFICACIONES PARA CONTAR LOS FURIOSOS
+  const { notifications, unreadCount, unreadPaymentsCount } = useNotifications()
+  
+  // 🔥 LÓGICA DE CONTEO DINÁMICO
+  const safeNotifs = Array.isArray(notifications) ? notifications : [];
+  const unreadFuriousCount = safeNotifs.filter(n => n.isFurious).length;
+  const unreadNormalCount = safeNotifs.filter(n => !n.isPayment && !n.isFurious).length;
 
   useEffect(() => {
     fetch(`/api/auth/me?t=${new Date().getTime()}`, { cache: "no-store" })
@@ -101,7 +109,6 @@ export function DashboardSidebar() {
       }).catch(console.error)
   }, [])
 
-  // Auto-expandir el grupo si la ruta activa está dentro de él
   useEffect(() => {
     let activeGroupId: string | null = null;
     
@@ -115,7 +122,6 @@ export function DashboardSidebar() {
       }
     });
 
-    // Si encontramos que estamos dentro de un grupo, lo abrimos y cerramos los demás
     if (activeGroupId) {
       setExpandedGroups({
         growth: activeGroupId === 'growth',
@@ -141,38 +147,45 @@ export function DashboardSidebar() {
     }));
   }
 
-  // Filtrado de seguridad
-  const visibleGroups = navigationGroups.map(group => {
-    const filteredItems = group.items.filter((item) => {
-      if (!user) return false; 
-      const isOwner = user.role === "OWNER"
-      const isAdmin = user.role === "AGENT" && user.permissions?.tier === "ADMIN"
+const visibleGroups = navigationGroups.map(group => {
+    const processedItems = group.items.reduce((acc, item) => {
+      if (!user) return acc;
+      const isOwner = user.role === "OWNER";
+      const isAdmin = user.role === "AGENT" && user.permissions?.tier === "ADMIN";
 
-      if (isOwner) return true;
-      if (isAdmin) {
-          if (item.ownerOnly) return false;
-          return true;
+      // 🔥 LÓGICA EXCLUSIVA E-COMMERCE
+      if (item.requiresFeature === "ecommerce") {
+          if (!user.addon_ecommerce) {
+              // 🔒 No lo tiene: Le mostramos el botón pero con candado PRO
+              acc.push({ ...item, isLocked: true });
+              return acc;
+          } else {
+              // ✅ SÍ lo tiene: Pasa limpio y con su ícono original
+              acc.push(item);
+              return acc;
+          }
       }
 
-      if (item.ownerOnly || item.ownerOrAdmin) return false;
-      if (item.href === "/dashboard/tasks") return true;
-      if (item.href === "/dashboard/messages") return true;
-      if (item.href === "/dashboard") return true;
-      if (item.href === "/dashboard/support") return true;
+      // Filtros normales para el resto del CRM
+      if (isOwner) { acc.push(item); return acc; }
+      if (isAdmin && !item.ownerOnly) { acc.push(item); return acc; }
+      if (item.ownerOnly || item.ownerOrAdmin) return acc;
+      if (["/dashboard/tasks", "/dashboard/messages", "/dashboard", "/dashboard/support"].includes(item.href)) { acc.push(item); return acc; }
       
       if (item.requiresFeature) {
           const featureKey = item.requiresFeature as string;
-          if (!user.permissions?.features) return false;
-          return user.permissions.features[featureKey] === true;
+          if (user.permissions?.features?.[featureKey]) { acc.push(item); return acc; }
+          return acc;
       }
-      return true; 
-    })
-    return { ...group, items: filteredItems }
-  }).filter(group => group.items.length > 0)
 
-  // Sub-componente para renderizar un ítem (para no repetir código)
+      acc.push(item);
+      return acc;
+    }, [] as any[]);
+
+    return { ...group, items: processedItems };
+  }).filter(group => group.items.length > 0);
+
   const renderItem = (item: any) => {
-    // 🔥 EL FIX DEL DASHBOARD: Diferenciamos la raíz exacta del resto
     const isActive = item.href === '/dashboard' 
       ? pathname === '/dashboard' 
       : (pathname === item.href || pathname.startsWith(item.href + "/"));
@@ -203,18 +216,25 @@ export function DashboardSidebar() {
           <div className="relative shrink-0 flex items-center justify-center">
               <item.icon className={cn("h-[20px] w-[20px] transition-transform duration-500", isActive && "scale-110", !isActive && "text-white/90")} />
               
-              {isCollapsed && item.name === "Mensajes" && (unreadCount > 0 || unreadPaymentsCount > 0) && (
+              {/* 🔥 PUNTITOS TITILANTES (COLAPSADO) */}
+              {isCollapsed && item.name === "Mensajes" && unreadCount > 0 && (
                   <div className="absolute -top-1.5 -right-2 flex gap-0.5">
+                      {unreadFuriousCount > 0 && (
+                          <span className="relative flex h-2.5 w-2.5" title="¡Cliente Furioso!">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500 border border-background"></span>
+                          </span>
+                      )}
                       {unreadPaymentsCount > 0 && (
-                          <span className="relative flex h-2.5 w-2.5">
+                          <span className="relative flex h-2.5 w-2.5" title="Ventas IA">
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-background"></span>
                           </span>
                       )}
-                      {unreadCount > 0 && (
-                          <span className="relative flex h-2.5 w-2.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500 border border-background"></span>
+                      {unreadNormalCount > 0 && (
+                          <span className="relative flex h-2.5 w-2.5" title="Nuevos mensajes">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-700 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500 border border-background"></span>
                           </span>
                       )}
                   </div>
@@ -230,19 +250,34 @@ export function DashboardSidebar() {
                   >
                       {item.name}
                   </motion.span>
+
+                  {item.isLocked && (
+                      <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="ml-auto pr-4">
+                          <span className="flex items-center gap-1 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm uppercase tracking-wider">
+                            PRO <Lock className="w-2.5 h-2.5" />
+                          </span>
+                      </motion.div>
+                  )}
                   
-                  {item.name === "Mensajes" && (unreadCount > 0 || unreadPaymentsCount > 0) && (
+                  {/* 🔥 PUNTITOS TITILANTES (EXPANDIDO) */}
+                  {item.name === "Mensajes" && unreadCount > 0 && (
                       <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="relative flex items-center gap-1.5 ml-auto pr-4">
+                          {unreadFuriousCount > 0 && (
+                              <span className="relative flex h-3 w-3" title="¡Cliente Furioso!">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>
+                              </span>
+                          )}
                           {unreadPaymentsCount > 0 && (
                               <span className="relative flex h-3 w-3" title="Ventas IA sin auditar">
                                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                                   <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
                               </span>
                           )}
-                          {unreadCount > 0 && (
+                          {unreadNormalCount > 0 && (
                               <span className="relative flex h-3 w-3" title="Mensajes sin leer">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                                  <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-3 w-3 bg-white shadow-[0_0_8px_rgba(59,130,246,0.8)]"></span>
                               </span>
                           )}
                       </motion.div>
@@ -288,7 +323,6 @@ export function DashboardSidebar() {
         {visibleGroups.map((group, index) => (
           <div key={group.id} className={cn("mb-2", group.isMain ? "mt-0" : "mt-4")}>
             
-            {/* Cabecera del Grupo (Oculta si está colapsado o si es el grupo principal) */}
             {!group.isMain && !isCollapsed && (
               <button 
                 onClick={() => toggleGroup(group.id)} 
@@ -302,7 +336,6 @@ export function DashboardSidebar() {
               </button>
             )}
 
-            {/* Ítems del Grupo con Slide In (Si está colapsado, siempre muestra los íconos) */}
             <AnimatePresence initial={false}>
               {(group.isMain || isCollapsed || expandedGroups[group.id]) && (
                 <motion.div

@@ -13,18 +13,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Checkbox } from "@/components/ui/checkbox"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { createAgent, updateAgent, deleteAgent, transferCredits } from "./actions/team-actions" // 🔥 Importaremos la nueva acción
+import { createAgent, updateAgent, deleteAgent, transferCredits } from "./actions/team-actions" 
 import { sileo } from "sileo"
 import { formatDistanceToNow } from "date-fns"
-import Link from "next/link" // 🔥 IMPORTANTE: Necesitamos Link
+import Link from "next/link" 
 import { es } from "date-fns/locale"
 import { TeamAnalytics } from "./team-analytics"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+
 interface Agent {
   id: string
   nombre: string
@@ -34,22 +30,24 @@ interface Agent {
   permissions: any
   ia_credits: number
   ia_credits_extra: number
-  last_active_at?: Date // 🔥 Nuevo
-  chats_activos?: number // 🔥 Nuevo
+  last_active_at?: Date 
+  chats_activos?: number 
 }
 
-interface WhatsAppLine {
+// 🔥 NUEVA INTERFAZ UNIFICADA
+interface Channel {
   id: string
   nombre: string
-  telefono: string | null
-  estado: string
+  identifier: string | null
+  status: string
+  platform: string
 }
 
 interface Props {
   agents: Agent[]
   ownerId: string
-  whatsappLines: WhatsAppLine[]
-  ownerCredits: number // 🔥 Saldo del jefe
+  channels: Channel[] // 🔥 Reemplaza whatsappLines
+  ownerCredits: number
   realSalesData: any[]
   usedAgents: number
   limitAgents: number
@@ -71,17 +69,24 @@ const AVAILABLE_FEATURES = [
   { id: 'metrics', name: 'Analíticas', icon: BarChart3, desc: 'KPIs globales' },
 ]
 
+// 🔥 DICCIONARIO DE LOGOS
+const PLATFORM_META: Record<string, any> = {
+  whatsapp:  { logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/WhatsApp.svg/3840px-WhatsApp.svg.png", label: "WhatsApp" },
+  telegram:  { logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/Telegram_logo.svg/960px-Telegram_logo.svg.png", label: "Telegram" },
+  instagram: { logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/95/Instagram_logo_2022.svg/960px-Instagram_logo_2022.svg.png", label: "Instagram" },
+  line:      { logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/LINE_logo.svg/960px-LINE_logo.svg.png", label: "LINE" },
+}
+
 function GlassCard({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <div className={`bg-card/60 backdrop-blur-xl rounded-3xl border border-border shadow-xl ${className}`}>{children}</div>
 }
 
-export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, ownerCredits, realSalesData, usedAgents, limitAgents, isLimitReached, plan 
-}: Props) {
+export function TeamManagement({ agents: initialAgents, ownerId, channels, ownerCredits, realSalesData, usedAgents, limitAgents, isLimitReached, plan }: Props) {
   const [open, setOpen] = useState(false)
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null)
   const [agents, setAgents] = useState<Agent[]>(initialAgents)
   const [loading, setLoading] = useState(false)
-  const [currentOwnerCredits, setCurrentOwnerCredits] = useState(ownerCredits) // Saldo local para UI
+  const [currentOwnerCredits, setCurrentOwnerCredits] = useState(ownerCredits) 
 
   const [nombre, setNombre] = useState("")
   const [email, setEmail] = useState("")
@@ -90,7 +95,6 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
   const [selectedLineIds, setSelectedLineIds] = useState<string[]>([])
   const [customFeatures, setCustomFeatures] = useState<Record<string, boolean>>({})
 
-  // 🔥 ESTADOS PARA CRÉDITOS
   const [creditsToTransfer, setCreditsToTransfer] = useState<string>("")
   const [transferType, setTransferType] = useState<"GIVE" | "TAKE">("GIVE")
   const [isTransferring, setIsTransferring] = useState(false)
@@ -103,7 +107,7 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
 
   const handleRoleChange = (role: RoleType) => {
     setSelectedRole(role)
-    if (role === "ADMIN") setSelectedLineIds(whatsappLines.map((line) => line.id))
+    if (role === "ADMIN") setSelectedLineIds(channels.map((channel) => channel.id))
   }
 
   const handleFeatureToggle = (featureId: string) => {
@@ -155,9 +159,8 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
       const permissions = { tier: selectedRole, allowedLineIds: selectedLineIds, features: finalFeatures }
 
       if (editingAgent) {
-        const result = await updateAgent(editingAgent.id, { nombre, role: selectedRole, permissions })
+        const result = await updateAgent(editingAgent.id, { nombre, role: selectedRole, permissions, password })
         if (result.success) {
-          // 🔥 CORREGIDO
           sileo.success({ title: "Agente actualizado", description: "Los cambios se aplicaron correctamente." })
           setAgents((prev) => prev.map((a) => (a.id === editingAgent.id ? { ...a, nombre, role: selectedRole, permissions } : a)))
           setOpen(false); resetForm()
@@ -168,49 +171,40 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
 
         const result = await createAgent(formData, ownerId)
         if (result.success) {
-          // 🔥 CORREGIDO
           sileo.success({ title: "Agente creado", description: "El nuevo miembro ya puede iniciar sesión." })
           window.location.reload()
         } else throw new Error(result.error)
       }
     } catch (error: any) {
-      // 🔥 CORREGIDO
       sileo.error({ title: "Error", description: error.message })
     } finally { setLoading(false) }
   }
 
- const handleDelete = async (agent: Agent) => {
+  const handleDelete = async (agent: Agent) => {
       if(confirm(`¿Estás seguro de eliminar a ${agent.nombre}? Sus créditos volverán a tu cuenta.`)) {
           const deleteResult = await deleteAgent(agent.id)
           if (deleteResult.success) {
             setAgents((prev) => prev.filter((a) => a.id !== agent.id))
-            // 🔥 CORREGIDO
             sileo.success({ title: "Agente eliminado" })
             window.location.reload() 
           } else {
-             // 🔥 CORREGIDO
              sileo.error({ title: "Error", description: deleteResult.error })
           }
       }
   }
 
-  // 🔥 LÓGICA DE TRANSFERENCIA DE CRÉDITOS
   const handleTransferCredits = async () => {
       if (!editingAgent) return;
       const amount = Number(creditsToTransfer)
-      // 🔥 CORREGIDO
       if (amount <= 0 || isNaN(amount)) return sileo.error({ title: "Monto inválido", description: "Ingresa un número mayor a 0." })
 
       if (transferType === "GIVE" && amount > currentOwnerCredits) {
-          // 🔥 CORREGIDO
-          return sileo.error({ title: "Saldo insuficiente", description: "No tienes suficientes créditos para transferir." })
+          return sileo.error({ title: "Saldo insuficiente", description: "No tienes suficientes créditos." })
       }
 
-      // Recordar: El agente ahora solo usa ia_credits, extra debería ser 0
       const agentTotalCredits = Number(editingAgent.ia_credits || 0) + Number(editingAgent.ia_credits_extra || 0)
       if (transferType === "TAKE" && amount > agentTotalCredits) {
-          // 🔥 CORREGIDO
-          return sileo.error({ title: "Monto inválido", className: "relative z-[9999]", style: { zIndex: 9999 }, description: "El agente no tiene tantos créditos para devolverte." })
+          return sileo.error({ title: "Monto inválido", className: "relative z-[9999]", style: { zIndex: 9999 }, description: "El agente no tiene tantos créditos." })
       }
 
       setIsTransferring(true)
@@ -218,30 +212,21 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
           const result = await transferCredits(ownerId, editingAgent.id, amount, transferType)
           
           if (result.success) {
-              // 🔥 CORREGIDO
               sileo.success({ title: "Transferencia exitosa", description: `Se ${transferType === 'GIVE' ? 'asignaron' : 'retiraron'} ${amount} créditos.` })
               
               setAgents(prev => prev.map(a => {
                   if(a.id === editingAgent.id) {
-                      // Ahora modificamos ia_credits (la billetera correcta del agente)
                       return { ...a, ia_credits: transferType === 'GIVE' ? Number(a.ia_credits) + amount : Number(a.ia_credits) - amount }
                   }
                   return a;
               }))
-              
               setCurrentOwnerCredits(prev => transferType === 'GIVE' ? prev - amount : prev + amount)
-              
               setEditingAgent(prev => prev ? { ...prev, ia_credits: transferType === 'GIVE' ? Number(prev.ia_credits) + amount : Number(prev.ia_credits) - amount } : null)
               setCreditsToTransfer("")
-          } else {
-              throw new Error(result.error)
-          }
+          } else { throw new Error(result.error) }
       } catch (error: any) {
-          // 🔥 CORREGIDO
-          sileo.error({ title: "Error de transferencia", description: error.message })
-      } finally {
-          setIsTransferring(false)
-      }
+          sileo.error({ title: "Error", description: error.message })
+      } finally { setIsTransferring(false) }
   }
 
   const getRoleData = (role: string, permissions: any) => {
@@ -253,7 +238,6 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
 
   return (
  <div className="space-y-8">
-      {/* HEADER CON SALDO GLOBAL Y BOTÓN LIMITADO */}
       <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-foreground">Gestión de Equipo</h1>
@@ -261,52 +245,41 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
         </div>
         
         <div className="flex items-center gap-4">
-          {/* 🔥 BÓVEDA DEL DUEÑO */}
           <div className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 rounded-xl">
-             <div className="p-1.5 bg-indigo-100 dark:bg-indigo-900/50 rounded-md">
-                 <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-             </div>
+             <div className="p-1.5 bg-indigo-100 dark:bg-indigo-900/50 rounded-md"><Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" /></div>
              <div>
                 <p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Tu Bóveda de IA</p>
                 <p className="text-sm font-bold text-foreground leading-none">{currentOwnerCredits.toLocaleString("es-AR")} créditos</p>
              </div>
           </div>
           
-          {/* 🔥 BOTÓN DE CREAR AGENTE (CON TOOLTIP Y LÍMITES) */}
-          <TooltipProvider>
+        <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <div tabIndex={0} className="inline-block">
                   {isLimitReached ? (
                     <Button disabled className="gap-2 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-500 h-12 px-6 cursor-not-allowed font-semibold shadow-sm">
-                      <Lock className="w-4 h-4" />
-                      Límite Alcanzado ({usedAgents}/{displayLimit})
+                      <Lock className="w-4 h-4" /> Límite Alcanzado ({usedAgents}/{displayLimit})
                     </Button>
                   ) : (
                     <Button onClick={openCreateModal} className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl shadow-lg h-12 px-6 font-semibold transition-all">
-                      <Plus className="mr-2 h-4 w-4" /> 
-                      Agregar Agente ({usedAgents}/{displayLimit})
+                      <Plus className="mr-2 h-4 w-4" /> Agregar Agente ({usedAgents}/{displayLimit})
                     </Button>
                   )}
                 </div>
               </TooltipTrigger>
-              
               {isLimitReached && (
                 <TooltipContent className="bg-slate-900 text-white border-none shadow-xl p-3 rounded-xl z-50">
                   <p className="font-semibold text-sm">Límite de equipo alcanzado</p>
-                  <p className="text-xs text-slate-300 mt-1">Tu plan actual permite un máximo de {limitAgents} agente{limitAgents !== 1 ? 's' : ''}.</p>
-                  <Link href="/dashboard/billing" className="text-emerald-400 text-xs font-bold mt-2 inline-block hover:underline">
-                    Comprar cupos adicionales &rarr;
-                  </Link>
+                  <p className="text-xs text-slate-300 mt-1">Tu plan permite un máximo de {limitAgents} agente{limitAgents !== 1 ? 's' : ''}.</p>
+                  <Link href="/dashboard/billing" className="text-emerald-400 text-xs font-bold mt-2 inline-block hover:underline">Comprar cupos adicionales &rarr;</Link>
                 </TooltipContent>
               )}
             </Tooltip>
           </TooltipProvider>
-
         </div>
       </motion.div>
 
-      {/* LISTA DE AGENTES */}
       {agents.length === 0 ? (
         <GlassCard className="p-12 flex flex-col items-center justify-center text-center">
             <div className="p-4 bg-muted rounded-2xl mb-4"><Users className="h-8 w-8 text-muted-foreground" /></div>
@@ -328,12 +301,22 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
               {agents.map((agent) => {
                 const roleData = getRoleData(agent.role, agent.permissions)
                 const Icon = roleData.icon
-                const lineCount = agent.permissions?.allowedLineIds?.length || 0
-                // 🔥 Calculamos sus créditos
                 const agentCredits = Number(agent.ia_credits || 0) + Number(agent.ia_credits_extra || 0)
                 
+                // 🔥 NUEVO: CÁLCULO DE CANALES ASIGNADOS
+                const allowedIds = agent.permissions?.allowedLineIds || [];
+                const agentChannels = agent.role === "ADMIN" 
+                    ? channels 
+                    : channels.filter(c => allowedIds.includes(c.id));
+                
+                const platformCounts = agentChannels.reduce((acc, curr) => {
+                    const p = curr.platform || 'whatsapp';
+                    acc[p] = (acc[p] || 0) + 1;
+                    return acc;
+                }, {} as Record<string, number>);
+
                 return (
-                  <motion.div key={agent.id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="flex items-center justify-between p-4 rounded-2xl hover:bg-muted/50 transition-all group border border-transparent hover:border-border">
+                  <motion.div key={agent.id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-2xl hover:bg-muted/50 transition-all group border border-transparent hover:border-border gap-4 sm:gap-0">
                     <div className="flex items-center gap-4">
                       <Avatar className="h-12 w-12 ring-2 ring-background shadow-sm">
                         <AvatarFallback className={`${roleData.bgColor} ${roleData.textColor} font-semibold text-lg`}>
@@ -343,22 +326,17 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
                       <div>
                         <p className="font-medium text-foreground">{agent.nombre}</p>
                         <p className="text-sm text-muted-foreground">{agent.email}</p>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 mt-1">
                             {agent.last_active_at && (new Date().getTime() - new Date(agent.last_active_at).getTime()) < 5 * 60 * 1000 ? (
                                 <>
-                                  <span className="relative flex h-2.5 w-2.5">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                                  </span>
+                                  <span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span></span>
                                   <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">En línea</span>
                                 </>
                             ) : (
                                 <>
                                   <span className="inline-flex rounded-full h-2 w-2 bg-slate-300 dark:bg-slate-600"></span>
                                   <span className="text-[11px] text-muted-foreground">
-                                    {agent.last_active_at 
-                                      ? `Últ. vez ${formatDistanceToNow(new Date(agent.last_active_at), { addSuffix: true, locale: es })}`
-                                      : 'Desconectado'}
+                                    {agent.last_active_at ? `Últ. vez ${formatDistanceToNow(new Date(agent.last_active_at), { addSuffix: true, locale: es })}` : 'Desconectado'}
                                   </span>
                                 </>
                             )}
@@ -366,23 +344,27 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-4">
-                      
-                      {/* 🔥 BADGE DE CRÉDITOS DEL AGENTE */}
-                      <Badge variant="secondary" className="hidden sm:flex items-center gap-1.5 px-2 py-1 bg-indigo-50 dark:bg-indigo-900/10 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800/30">
-                          <Sparkles className="w-3 h-3" />
-                          {agentCredits.toLocaleString("es-AR")}
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Badge variant="secondary" className="hidden lg:flex items-center gap-1.5 px-2 py-1 bg-indigo-50 dark:bg-indigo-900/10 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800/30">
+                          <Sparkles className="w-3 h-3" />{agentCredits.toLocaleString("es-AR")}
                       </Badge>
 
-                      <div className="flex items-center gap-2">
-                        <Badge className={`${roleData.bgColor} ${roleData.textColor} gap-1 border-0`}>
-                          <Icon className="h-3 w-3" /> {roleData.title}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge className={`${roleData.bgColor} ${roleData.textColor} gap-1 border-0`}><Icon className="h-3 w-3" /> {roleData.title}</Badge>
+                        <Badge variant="outline" className="hidden sm:flex items-center gap-1.5 px-2 py-1 bg-blue-50 dark:bg-blue-900/10 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800/30">
+                          <MessageSquare className="w-3 h-3" />{agent.chats_activos || 0} chats
                         </Badge>
 
-                        <Badge variant="outline" className="hidden sm:flex items-center gap-1.5 px-2 py-1 bg-blue-50 dark:bg-blue-900/10 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800/30">
-                          <MessageSquare className="w-3 h-3" />
-                          {agent.chats_activos || 0} chats
-                      </Badge>
+                        {/* 🔥 NUEVO: BADGES DE PLATAFORMAS DINÁMICOS */}
+                        {Object.entries(platformCounts).map(([plat, count]) => {
+                            const meta = PLATFORM_META[plat] || PLATFORM_META.whatsapp;
+                            return (
+                              <Badge key={plat} variant="outline" className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-slate-900 shadow-sm border-slate-200 dark:border-slate-800">
+                                <img src={meta.logo} alt={meta.label} className="w-3.5 h-3.5 object-contain drop-shadow-sm" />
+                                <span className="text-xs font-bold text-slate-600 dark:text-slate-300">{count}</span>
+                              </Badge>
+                            )
+                        })}
                       </div>
 
                       <DropdownMenu>
@@ -390,8 +372,7 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
                           <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"><MoreVertical className="h-4 w-4" /></Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="rounded-xl">
-                          <DropdownMenuItem onClick={() => openEditModal(agent)} className="rounded-lg cursor-pointer"><Pencil className="mr-2 h-4 w-4" /> Configurar Agente</DropdownMenuItem>
-                          <DropdownMenuItem disabled className="rounded-lg"><Key className="mr-2 h-4 w-4" /> Cambiar Contraseña</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openEditModal(agent)} className="rounded-lg cursor-pointer"><Pencil className="mr-2 h-4 w-4 text-blue-500" /> Configurar Agente</DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleDelete(agent)} className="text-red-600 focus:text-red-600 rounded-lg cursor-pointer"><Trash2 className="mr-2 h-4 w-4" /> Eliminar</DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -405,7 +386,6 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
       )}
           <TeamAnalytics realSalesData={realSalesData} />
 
-      {/* MODAL PRINCIPAL */}
       <Dialog open={open} onOpenChange={(isOpen) => { setOpen(isOpen); if (!isOpen) resetForm() }}>
         <DialogContent className="max-w-2xl  max-h-[90vh] overflow-y-auto bg-background text-foreground border-border rounded-3xl shadow-2xl">
           <DialogHeader>
@@ -413,18 +393,15 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
             <DialogDescription className="text-muted-foreground">Configura identidad, permisos y saldos de IA.</DialogDescription>
           </DialogHeader>
 
-          {/* 🔥 MODIFICAMOS LOS TABS */}
           <Tabs defaultValue="profile" className="w-full mt-4">
             <TabsList className={`grid w-full bg-muted p-1 rounded-xl ${editingAgent ? 'grid-cols-3' : 'grid-cols-2'}`}>
               <TabsTrigger value="profile" className="rounded-lg">Perfil</TabsTrigger>
               <TabsTrigger value="permissions" className="rounded-lg">Permisos</TabsTrigger>
-              {/* 🔥 PESTAÑA DE CRÉDITOS (Solo aparece al editar, no al crear) */}
               {editingAgent && <TabsTrigger value="credits" className="rounded-lg text-indigo-600 dark:text-indigo-400 data-[state=active]:bg-indigo-100 dark:data-[state=active]:bg-indigo-900/50">Créditos IA</TabsTrigger>}
             </TabsList>
 
             <form onSubmit={handleSubmit}>
               <TabsContent value="profile" className="space-y-4 mt-6">
-                 {/* ... (Todo lo del profile queda igual, no lo toqué) */}
                  <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="nombre">Nombre Completo</Label>
@@ -441,12 +418,8 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
                     {editingAgent ? "Nueva Contraseña (Opcional)" : "Contraseña Temporal"}
                   </Label>
                   <Input 
-                    id="password" 
-                    type="password" 
-                    value={password} 
-                    onChange={(e) => setPassword(e.target.value)} 
-                    required={!editingAgent} // Solo es obligatorio al crear
-                    minLength={6} 
+                    id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} 
+                    required={!editingAgent} minLength={6} 
                     placeholder={editingAgent ? "Escribe aquí para cambiarla, o deja en blanco" : "Mínimo 6 caracteres"}
                     className="rounded-xl bg-background" 
                   />
@@ -454,8 +427,7 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
               </TabsContent>
 
               <TabsContent value="permissions" className="space-y-6 mt-6">
-                  {/* ... (Todo lo de permissions queda igual, no lo toqué) */}
-                  <div className="space-y-3">
+                <div className="space-y-3">
                   <Label>Nivel de Acceso</Label>
                   <div className="grid sm:grid-cols-3 gap-3">
                     {roles.map((role) => {
@@ -501,28 +473,33 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
                 </AnimatePresence>
 
                 <div className="space-y-3">
-                  <Label>Líneas Asignadas</Label>
-                  {whatsappLines.length === 0 ? (
-                    <div className="p-6 rounded-2xl bg-muted text-center"><p className="text-sm text-muted-foreground">No hay líneas configuradas</p></div>
+                  <Label>Canales Asignados (WhatsApp, IG, Telegram, etc.)</Label>
+                  {channels.length === 0 ? (
+                    <div className="p-6 rounded-2xl bg-muted text-center"><p className="text-sm text-muted-foreground">No hay canales configurados</p></div>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {whatsappLines.map((line) => {
-                        const isLineSelected = selectedLineIds.includes(line.id) || selectedRole === "ADMIN";
+                      {channels.map((channel) => {
+                        const meta = PLATFORM_META[channel.platform] || PLATFORM_META.whatsapp;
+                        const isLineSelected = selectedLineIds.includes(channel.id) || selectedRole === "ADMIN";
+                        
                         return (
                             <Label 
-                                key={line.id} 
-                                htmlFor={`line-${line.id}`}
+                                key={channel.id} 
+                                htmlFor={`ch-${channel.id}`}
                                 className={`flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer ${selectedRole === "ADMIN" ? "opacity-60 cursor-not-allowed bg-muted border-border" : "hover:bg-muted/50"} ${isLineSelected ? "border-primary/50 bg-primary/5" : "border-border"}`}
                             >
                                 <Checkbox 
-                                    id={`line-${line.id}`}
+                                    id={`ch-${channel.id}`}
                                     checked={isLineSelected} 
-                                    onCheckedChange={() => handleLineToggle(line.id)}
+                                    onCheckedChange={() => handleLineToggle(channel.id)}
                                     disabled={selectedRole === "ADMIN"} 
                                 />
+                                <div className="p-1.5 bg-white rounded-lg border border-slate-100 shadow-sm">
+                                    <img src={meta.logo} alt={meta.label} className="w-5 h-5 object-contain drop-shadow-sm" />
+                                </div>
                                 <div className="flex-1">
-                                    <p className="text-sm font-medium text-foreground">{line.nombre}</p>
-                                    {line.telefono && <p className="text-xs text-muted-foreground">{line.telefono}</p>}
+                                    <p className="text-sm font-bold text-foreground">{channel.nombre}</p>
+                                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-semibold">{meta.label}</p>
                                 </div>
                             </Label>
                         )
@@ -532,20 +509,16 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
                 </div>
               </TabsContent>
 
-              {/* CONTROLES DEL FORMULARIO ORIGINAL (Solo visibles en perfil/permisos) */}
               <div className="flex gap-3 mt-8 pt-4 border-t border-border">
                 <Button type="button" variant="ghost" onClick={() => setOpen(false)} className="flex-1 rounded-xl">Cancelar</Button>
                 <Button type="submit" disabled={loading} className="flex-1 rounded-xl shadow-lg">
-                  {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                  {editingAgent ? "Guardar Cambios" : "Crear Agente"}
+                  {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} {editingAgent ? "Guardar Cambios" : "Crear Agente"}
                 </Button>
               </div>
             </form>
 
-            {/* 🔥 NUEVA PESTAÑA: CRÉDITOS DE IA (Fuera del form original para tener su propio botón) */}
             {editingAgent && (
               <TabsContent value="credits" className="space-y-6 mt-6">
-                 
                  <div className="bg-indigo-50 dark:bg-indigo-950/30 p-5 rounded-2xl border border-indigo-100 dark:border-indigo-900/50 flex items-center justify-between">
                     <div>
                        <p className="text-sm text-indigo-600 dark:text-indigo-400 font-semibold mb-1">Saldo Actual de {editingAgent.nombre}</p>
@@ -560,19 +533,12 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
 
                  <div className="space-y-4">
                     <Label className="text-base">Transferir Créditos</Label>
-                    
                     <div className="grid grid-cols-2 gap-3">
-                        <div 
-                          onClick={() => setTransferType("GIVE")}
-                          className={`p-3 rounded-xl border-2 text-center cursor-pointer transition-all ${transferType === "GIVE" ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20" : "border-border hover:border-indigo-200"}`}
-                        >
+                        <div onClick={() => setTransferType("GIVE")} className={`p-3 rounded-xl border-2 text-center cursor-pointer transition-all ${transferType === "GIVE" ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20" : "border-border hover:border-indigo-200"}`}>
                             <p className="font-semibold text-sm">Asignar a Agente</p>
                             <p className="text-xs text-muted-foreground mt-0.5">Descuenta de tu saldo</p>
                         </div>
-                        <div 
-                          onClick={() => setTransferType("TAKE")}
-                          className={`p-3 rounded-xl border-2 text-center cursor-pointer transition-all ${transferType === "TAKE" ? "border-amber-500 bg-amber-50 dark:bg-amber-900/20" : "border-border hover:border-amber-200"}`}
-                        >
+                        <div onClick={() => setTransferType("TAKE")} className={`p-3 rounded-xl border-2 text-center cursor-pointer transition-all ${transferType === "TAKE" ? "border-amber-500 bg-amber-50 dark:bg-amber-900/20" : "border-border hover:border-amber-200"}`}>
                             <p className="font-semibold text-sm text-amber-700 dark:text-amber-500">Retirar a Agente</p>
                             <p className="text-xs text-muted-foreground mt-0.5">Vuelve a tu saldo</p>
                         </div>
@@ -580,31 +546,13 @@ export function TeamManagement({ agents: initialAgents, ownerId, whatsappLines, 
 
                     <div className="relative mt-2">
                         <ArrowRightLeft className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-                        <Input 
-                            type="number" 
-                            min="1"
-                            placeholder="Ej: 500" 
-                            className="pl-10 h-12 text-lg rounded-xl" 
-                            value={creditsToTransfer}
-                            onChange={(e) => setCreditsToTransfer(e.target.value)}
-                        />
+                        <Input type="number" min="1" placeholder="Ej: 500" className="pl-10 h-12 text-lg rounded-xl" value={creditsToTransfer} onChange={(e) => setCreditsToTransfer(e.target.value)} />
                     </div>
-                    
-                    <p className="text-xs text-muted-foreground text-right">
-                       Tu bóveda actual: <span className="font-bold text-indigo-600 dark:text-indigo-400">{currentOwnerCredits.toLocaleString("es-AR")}</span>
-                    </p>
+                    <p className="text-xs text-muted-foreground text-right">Tu bóveda actual: <span className="font-bold text-indigo-600 dark:text-indigo-400">{currentOwnerCredits.toLocaleString("es-AR")}</span></p>
 
-                    <Button 
-                        type="button" 
-                        disabled={isTransferring || !creditsToTransfer || Number(creditsToTransfer) <= 0} 
-                        onClick={handleTransferCredits}
-                        className={`w-full h-12 rounded-xl text-base shadow-lg ${transferType === "GIVE" ? "bg-indigo-600 hover:bg-indigo-700" : "bg-amber-600 hover:bg-amber-700 text-white"}`}
-                    >
-                        {isTransferring ? <Loader2 className="w-5 h-5 animate-spin" /> : 
-                          transferType === "GIVE" ? "Confirmar Asignación" : "Confirmar Retiro"
-                        }
+                    <Button type="button" disabled={isTransferring || !creditsToTransfer || Number(creditsToTransfer) <= 0} onClick={handleTransferCredits} className={`w-full h-12 rounded-xl text-base shadow-lg ${transferType === "GIVE" ? "bg-indigo-600 hover:bg-indigo-700 text-white" : "bg-amber-600 hover:bg-amber-700 text-white"}`}>
+                        {isTransferring ? <Loader2 className="w-5 h-5 animate-spin" /> : transferType === "GIVE" ? "Confirmar Asignación" : "Confirmar Retiro"}
                     </Button>
-
                  </div>
               </TabsContent>
             )}

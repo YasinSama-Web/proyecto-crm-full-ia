@@ -9,10 +9,11 @@ import { useNotifications } from "@/contexts/notification-context"
 import { MessageSquare } from "lucide-react"
 import type { Conversacion, LineaWhatsApp, Mensaje } from "@/lib/db-types"
 import { useSearchParams, useRouter } from "next/navigation"
+import { useQueryClient } from "@tanstack/react-query"
 
-// 🔥 TIPO GLOBAL PARA ETIQUETAS
 export type Tag = { id: string; name: string; color: string; usage_count?: number }
 
+// 🔥 TIPO ACTUALIZADO CON IA
 type ConversacionConStatus = Conversacion & { 
   unread_count: number; 
   last_message: string | null;
@@ -20,17 +21,25 @@ type ConversacionConStatus = Conversacion & {
   status?: string;
   tags?: string[];
   usuario_id?: string;
+  ai_profile?: string | null;
+  lead_score?: number | null;
+  lead_score_reason?: string | null;
+  unread_ia_payment?: boolean;
 }
 
+// 🔥 AQUÍ ESTABA EL ERROR ANTES: Hay que decirle a TS que vamos a recibir esto
 interface Props {
   userId: string 
   initialConversations: ConversacionConStatus[]
   lines: LineaWhatsApp[]
   agents?: any[]
+  hasEcommerceAddon: boolean // <--- ¡Esta línea es obligatoria!
 }
 
-export function MessageCenter({ userId, initialConversations, lines, agents = [] }: Props) {
-  const [conversations, setConversations] = useState<ConversacionConStatus[]>(initialConversations)
+// 🔥 Y hay que recibirlo aquí en los parámetros
+export function MessageCenter({ userId, initialConversations, lines, agents = [], hasEcommerceAddon }: Props) {
+  const queryClient = useQueryClient()
+  
   const [selectedConversation, setSelectedConversation] = useState<ConversacionConStatus | null>(null)
   const [showDetails, setShowDetails] = useState(false)
   const [availableTags, setAvailableTags] = useState<Tag[]>([])
@@ -41,8 +50,6 @@ export function MessageCenter({ userId, initialConversations, lines, agents = []
   const searchParams = useSearchParams()
   const router = useRouter()
   const [tab, setTab] = useState("OPEN")
-
-  // 🔥 EFECTO: Carga los colores reales de las etiquetas para la lista de chats
   useEffect(() => {
     fetch('/api/tags')
       .then(res => res.ok ? res.json() : [])
@@ -57,19 +64,28 @@ export function MessageCenter({ userId, initialConversations, lines, agents = []
     }
   }, [])
 
-  useEffect(() => {
-      setConversations(initialConversations)
-  }, [initialConversations])
+  // Inicializar Caché
+  // useEffect(() => {
+  //     queryClient.setQueryData(['conversations'], initialConversations)
+  // }, [initialConversations, queryClient])
 
+  // Modificar Tags fluido
   const handleUpdateConversationTags = (conversationId: string, newTags: string[]) => {
-    setConversations((prev) => prev.map((c) => (c.id === conversationId ? { ...c, tags: newTags } : c)))
+    queryClient.setQueryData(['conversations'], (old: any[]) => {
+      if (!old) return old;
+      return old.map(c => c.id === conversationId ? { ...c, tags: newTags } : c);
+    });
     if (selectedConversation?.id === conversationId) {
       setSelectedConversation((prev) => (prev ? { ...prev, tags: newTags } : null))
     }
   }
 
+  // Modificar Info fluido
   const handleUpdateContactData = (conversationId: string, newData: { name?: string, notes?: string }) => {
-    setConversations((prev) => prev.map((c) => (c.id === conversationId ? { ...c, contact_name: newData.name ?? c.contact_name, notes: newData.notes ?? c.notes } : c)))
+    queryClient.setQueryData(['conversations'], (old: any[]) => {
+      if (!old) return old;
+      return old.map(c => c.id === conversationId ? { ...c, contact_name: newData.name ?? c.contact_name, notes: newData.notes ?? c.notes } : c);
+    });
     if (selectedConversation?.id === conversationId) {
       setSelectedConversation((prev) => (prev ? { ...prev, contact_name: newData.name ?? prev.contact_name, notes: newData.notes ?? prev.notes } : null))
     }
@@ -84,7 +100,12 @@ export function MessageCenter({ userId, initialConversations, lines, agents = []
     if (selectedConversation?.id !== conv.id) setSelectedConversation(conv)
     setMobileShowChat(true)
     clearNotificationsByConversation(conv.id)
-    setConversations((prev) => prev.map((c) => (c.id === conv.id ? { ...c, unread_count: 0 } : c)))
+    
+    // Quitar no leídos de la caché al instante
+    queryClient.setQueryData(['conversations'], (old: any[]) => {
+      if (!old) return old;
+      return old.map(c => c.id === conv.id ? { ...c, unread_count: 0, unread_ia_payment: false } : c);
+    });
 
     try {
       await fetch(`/api/conversations/${conv.id}/read`, { method: "POST", headers: { "Content-Type": "application/json" }, keepalive: true })
@@ -95,12 +116,17 @@ export function MessageCenter({ userId, initialConversations, lines, agents = []
     if (!selectedConversation) return
     const updatedConv = { ...selectedConversation, status: newStatus }
     setSelectedConversation(updatedConv)
-    setConversations((prev) => prev.map((c) => c.id === selectedConversation.id ? { ...c, status: newStatus } : c))
+    
+    queryClient.setQueryData(['conversations'], (old: any[]) => {
+      if (!old) return old;
+      return old.map(c => c.id === selectedConversation.id ? { ...c, status: newStatus } : c);
+    });
     try {
       await fetch(`/api/conversations/${selectedConversation.id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: newStatus }) })
     } catch (error) {}
   }
 
+  // 🔥 WEBSOCKETS INYECTANDO A LA CACHÉ (FLUIDEZ) 🔥
   useEffect(() => {
     if (!socket) return
 
@@ -109,12 +135,14 @@ export function MessageCenter({ userId, initialConversations, lines, agents = []
 
       const isIncoming = data.message.is_incoming === true
 
-      setConversations((prev) => {
-        const existingIndex = prev.findIndex((c) => c.id === data.conversationId)
-        let updatedList = [...prev]
+      // 🔥 Usamos queryClient en lugar de setConversations para que no haya lag
+      queryClient.setQueryData(['conversations'], (old: any[]) => {
+        if (!old) return old;
+        const existingIndex = old.findIndex((c) => c.id === data.conversationId)
+        let updatedList = [...old]
 
         if (existingIndex !== -1) {
-          const existingConv = prev[existingIndex]
+          const existingConv = old[existingIndex]
           const currentCount = Number(existingConv.unread_count || 0)
           const newUnreadCount = isIncoming && selectedConversation?.id !== existingConv.id ? currentCount + 1 : 0
 
@@ -144,10 +172,21 @@ export function MessageCenter({ userId, initialConversations, lines, agents = []
         }
         return updatedList
       })
+
+      // Actualizar ChatView si estamos en él (Para no perder cerebrito)
+      if (selectedConversation?.id === data.conversationId) {
+         setSelectedConversation(prev => prev ? {
+             ...prev,
+             ai_profile: data.ai_profile !== undefined ? data.ai_profile : prev.ai_profile,
+             lead_score: data.lead_score !== undefined ? data.lead_score : prev.lead_score,
+             unread_ia_payment: data.unreadIaPayment !== undefined ? data.unreadIaPayment : prev.unread_ia_payment
+         } : prev);
+      }
     }
+    
     socket.on("new_message", onNewMessage)
     return () => { socket.off("new_message", onNewMessage) }
-  }, [socket, selectedConversation, clearNotificationsByConversation, userId])
+  }, [socket, selectedConversation?.id, userId, queryClient])
 
   const handleDraftChange = (conversationId: string, text: string) => {
     setDrafts(prev => {
@@ -159,18 +198,19 @@ export function MessageCenter({ userId, initialConversations, lines, agents = []
     })
   }
 
+  // URL Fluida (Lee de caché, no del estado)
   useEffect(() => {
     const conversationIdFromUrl = searchParams.get("id")
-    if (conversationIdFromUrl && conversations.length > 0) {
-      const targetConversation = conversations.find(c => c.id === conversationIdFromUrl)
-      if (targetConversation) {
-        if (selectedConversation?.id !== targetConversation.id) {
-            setSelectedConversation(targetConversation)
-            setMobileShowChat(true)
-        }
+    if (conversationIdFromUrl) {
+      const cachedConversations = queryClient.getQueryData<ConversacionConStatus[]>(['conversations']) || initialConversations;
+      const targetConversation = cachedConversations.find(c => c.id === conversationIdFromUrl)
+      
+      if (targetConversation && selectedConversation?.id !== targetConversation.id) {
+          setSelectedConversation(targetConversation)
+          setMobileShowChat(true)
       }
     }
-  }, [searchParams, conversations])
+  }, [searchParams, queryClient])
 
   const handleMobileBack = () => {
     setMobileShowChat(false)
@@ -204,6 +244,7 @@ export function MessageCenter({ userId, initialConversations, lines, agents = []
                lines={lines}
                onBack={handleMobileBack} 
                currentUserId={userId} 
+               hasEcommerceAddon={hasEcommerceAddon}
                onToggleStatus={(nuevoEstado) => {
                    handleToggleStatus(nuevoEstado); 
                    if (nuevoEstado === "OPEN") setTab("OPEN");
