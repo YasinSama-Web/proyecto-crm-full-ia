@@ -103,7 +103,7 @@ export async function sendMessage({
         await sql`
           INSERT INTO mensajes (
             id, conversation_id, content, type, is_incoming, 
-            timestamp, usuario_id, media_url, status,
+            timestamp, usuario_id, marketing_fbcid, media_url, status,
             quoted_message_id, quoted_participant, quoted_content
           )
           VALUES (

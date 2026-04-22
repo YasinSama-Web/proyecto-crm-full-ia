@@ -24,7 +24,7 @@ export async function GET(req: Request) {
               WHEN cont.name IS NOT NULL AND cont.name != '' AND cont.name != c.contact_phone THEN cont.name 
               ELSE c.contact_name 
             END as contact_name, 
-            c.contact_phone, c.unread_count, c.unread_ia_payment, c.status, c.last_activity, c."lineId", c.usuario_id, c.is_group, c.assigned_to, 
+            c.contact_phone, c.marketing_fbcid, c.unread_count, c.unread_ia_payment, c.status, c.last_activity, c."lineId", c.usuario_id, c.is_group, c.assigned_to, 
             cont.tags,
             cont.ai_profile, cont.lead_score, cont.lead_score_reason,
             (SELECT content FROM mensajes m WHERE m.conversation_id = c.id ORDER BY m.timestamp DESC LIMIT 1) as last_message_content,
@@ -51,7 +51,7 @@ export async function GET(req: Request) {
                   WHEN cont.name IS NOT NULL AND cont.name != '' AND cont.name != c.contact_phone THEN cont.name 
                   ELSE c.contact_name 
                 END as contact_name, 
-                c.contact_phone, c.unread_count, c.unread_ia_payment, c.status, c.last_activity, c."lineId", c.usuario_id, c.is_group, c.assigned_to, 
+                c.contact_phone, c.marketing_fbcid, c.unread_count, c.unread_ia_payment, c.status, c.last_activity, c."lineId", c.usuario_id, c.is_group, c.assigned_to, 
                 cont.tags,
                 cont.ai_profile, cont.lead_score, cont.lead_score_reason,
                 (SELECT content FROM mensajes m WHERE m.conversation_id = c.id ORDER BY m.timestamp DESC LIMIT 1) as last_message_content,
@@ -73,7 +73,7 @@ export async function GET(req: Request) {
                   WHEN cont.name IS NOT NULL AND cont.name != '' AND cont.name != c.contact_phone THEN cont.name 
                   ELSE c.contact_name 
                 END as contact_name, 
-                c.contact_phone, c.unread_count, c.unread_ia_payment, c.status, c.last_activity, c."lineId", c.usuario_id, c.is_group, c.assigned_to, 
+                c.contact_phone,c.marketing_fbcid, c.unread_count, c.unread_ia_payment, c.status, c.last_activity, c."lineId", c.usuario_id, c.is_group, c.assigned_to, 
                 cont.tags,
                cont.ai_profile, cont.lead_score, cont.lead_score_reason,
                 (SELECT content FROM mensajes m WHERE m.conversation_id = c.id ORDER BY m.timestamp DESC LIMIT 1) as last_message_content,
@@ -110,6 +110,7 @@ export async function GET(req: Request) {
             ai_profile: c.ai_profile, 
             lead_score: c.lead_score,               // 🔥 AGREGAR
             lead_score_reason: c.lead_score_reason, // 🔥 AGREGAR
+            marketing_fbcid: c.marketing_fbcid,
             lineId: c.lineId,
             line_id: c.lineId,
             usuario_id: c.usuario_id,

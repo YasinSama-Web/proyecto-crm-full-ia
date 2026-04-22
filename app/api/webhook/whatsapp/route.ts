@@ -96,15 +96,24 @@ export async function POST(request: Request) {
     let extractedFbcid = null;
 
     // 🔥 NUEVO REGEX: Busca (Ref:algo|fb:el_id_de_facebook)
+    // 🔥 NUEVO REGEX: Busca (Ref:algo|fb:el_id_de_facebook)
     const attrMatch = finalContent ? finalContent.match(/\(Ref:\s*([^|)]+)(?:\|fb:([^)]+))?\)/i) : null;
     
     if (attrMatch) {
         const ref = attrMatch[1]; // ej: "web" o el slug
         extractedFbcid = attrMatch[2] || null; // ej: "IwAR1512..."
 
-        // (Si usas landings internas, buscas el ID aquí)
+        // 🔥 TRAMPA PARA LA CONSOLA:
+        console.log("=========================================");
+        console.log("👀 TEXTO RECIBIDO:", finalContent);
+        console.log("🎯 REF ENCONTRADO:", ref);
+        console.log("💎 FBCID EXTRAIDO:", extractedFbcid);
+        console.log("=========================================");
+
         const landingRes = await sql`SELECT id FROM landings WHERE slug = ${ref.toLowerCase()} AND usuario_id = ${usuarioId} LIMIT 1`;
         if (landingRes.length > 0) sourceLandingId = landingRes[0].id;
+    } else {
+        console.log("⚠️ El Regex no atrapó nada en este texto:", finalContent);
     }
 
     // Al crear o actualizar la conversación, guardamos el fbcid:
