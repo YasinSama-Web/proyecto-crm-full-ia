@@ -93,32 +93,42 @@ export async function POST(request: Request) {
 
     // --- GESTIÓN DE CONVERSACIÓN ---
     let sourceLandingId = null;
-    const refMatch = finalContent ? finalContent.match(/\(Ref:\s*([\w-]+)\)/i) : null;
-    if (refMatch && refMatch[1]) {
-        const landingRes = await sql`SELECT id FROM landings WHERE slug = ${refMatch[1].toLowerCase()} AND usuario_id = ${usuarioId} LIMIT 1`;
+    let extractedFbcid = null;
+
+    // 🔥 NUEVO REGEX: Busca (Ref:algo|fb:el_id_de_facebook)
+    const attrMatch = finalContent ? finalContent.match(/\(Ref:\s*([^|)]+)(?:\|fb:([^)]+))?\)/i) : null;
+    
+    if (attrMatch) {
+        const ref = attrMatch[1]; // ej: "web" o el slug
+        extractedFbcid = attrMatch[2] || null; // ej: "IwAR1512..."
+
+        // (Si usas landings internas, buscas el ID aquí)
+        const landingRes = await sql`SELECT id FROM landings WHERE slug = ${ref.toLowerCase()} AND usuario_id = ${usuarioId} LIMIT 1`;
         if (landingRes.length > 0) sourceLandingId = landingRes[0].id;
     }
 
-    const existingConv = await sql`
-      SELECT id FROM conversaciones 
-      WHERE line_id = ${lineId} AND contact_phone = ${contactPhone} AND usuario_id = ${usuarioId}
-    `
+    // Al crear o actualizar la conversación, guardamos el fbcid:
+    const existingConv = await sql`SELECT id FROM conversaciones WHERE line_id = ${lineId} AND contact_phone = ${contactPhone} AND usuario_id = ${usuarioId}`
     let conversationId: string
 
     if (existingConv.length === 0) {
       const newConv = await sql`
-        INSERT INTO conversaciones (usuario_id, line_id, contact_phone, contact_name, last_activity, status, source_landing_id, bot_enabled)
-        VALUES (${usuarioId}, ${lineId}, ${contactPhone}, ${contactName || null}, NOW(), 'PENDING', ${sourceLandingId}, true)
+        INSERT INTO conversaciones (usuario_id, line_id, contact_phone, contact_name, last_activity, status, source_landing_id, bot_enabled, marketing_fbcid)
+        VALUES (${usuarioId}, ${lineId}, ${contactPhone}, ${contactName || null}, NOW(), 'PENDING', ${sourceLandingId}, true, ${extractedFbcid})
         RETURNING id
       `
       conversationId = newConv[0].id
     } else {
       conversationId = existingConv[0].id
       
-      const updateQuery = sourceLandingId 
-          ? sql`UPDATE conversaciones SET last_activity = NOW(), contact_name = COALESCE(${contactName}, contact_name), source_landing_id = ${sourceLandingId} WHERE id = ${conversationId}`
-          : sql`UPDATE conversaciones SET last_activity = NOW(), contact_name = COALESCE(${contactName}, contact_name) WHERE id = ${conversationId}`;
-      await updateQuery;
+      await sql`
+        UPDATE conversaciones 
+        SET last_activity = NOW(), 
+            contact_name = COALESCE(${contactName}, contact_name), 
+            source_landing_id = COALESCE(${sourceLandingId}, source_landing_id),
+            marketing_fbcid = COALESCE(${extractedFbcid}, marketing_fbcid) -- 🔥 Actualizamos si viene uno nuevo
+        WHERE id = ${conversationId}
+      `;
     }
 
     // --- GUARDAR MENSAJE RECIBIDO ---
