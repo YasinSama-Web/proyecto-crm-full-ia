@@ -22,7 +22,10 @@ export async function GET(req: Request) {
     const user = await requireAuth(req)
     const rootOwnerId = user.rootOwnerId
 
-    const conversationId = url.searchParams.get("conversationId")
+     const conversationId = url.searchParams.get("conversationId")
+    const limit = Math.min(parseInt(url.searchParams.get('limit') || '30', 10), 100)
+    const before = url.searchParams.get("before") // timestamp del mensaje más viejo
+
 
     if (!conversationId) {
       return NextResponse.json({ error: "conversationId is required" }, { status: 400 })
@@ -52,33 +55,30 @@ export async function GET(req: Request) {
         }
     }
 
-    // 3. MENSAJES (limitado a 50 para performance)
-    const messages = await sql`
-      SELECT 
-        id, 
-        conversation_id, 
-        type, 
-        content, 
-        is_incoming, 
-        timestamp,          
-        media_url,          
-        amount,             
-        processed_by_ai,    
-        is_receipt,          
-        status,       
-        is_read,
-        sender_name,
-        quoted_message_id,
-        quoted_participant,
-        quoted_content,
-        whatsapp_id         
-      FROM mensajes
-      WHERE conversation_id = ${conversationId}
-      ORDER BY timestamp DESC
-      LIMIT 50
-    `
+  const messages = before
+      ? await sql`
+          SELECT 
+            id, conversation_id, type, content, is_incoming, timestamp,          
+            media_url, amount, processed_by_ai, is_receipt, status, is_read,
+            sender_name, quoted_message_id, quoted_participant, quoted_content, whatsapp_id         
+          FROM mensajes
+          WHERE conversation_id = ${conversationId}
+            AND timestamp < ${before}
+          ORDER BY timestamp DESC
+          LIMIT ${limit}
+        `
+      : await sql`
+          SELECT 
+            id, conversation_id, type, content, is_incoming, timestamp,          
+            media_url, amount, processed_by_ai, is_receipt, status, is_read,
+            sender_name, quoted_message_id, quoted_participant, quoted_content, whatsapp_id         
+          FROM mensajes
+          WHERE conversation_id = ${conversationId}
+          ORDER BY timestamp DESC
+          LIMIT ${limit}
+        `
 
-    // Normalización
+    // Normalización (igual que tenías)
     const normalized = messages.reverse().map((m) => ({
       ...m,
       is_incoming: m.is_incoming === true || m.is_incoming === "true",

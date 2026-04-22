@@ -77,7 +77,7 @@ export function KpiCardWrapper({ userName, today, isAgent, stats }: KpiCardWrapp
   return (
     <>
       {/* Header with staggered animation */}
-      <motion.div
+      {/* <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
@@ -87,7 +87,7 @@ export function KpiCardWrapper({ userName, today, isAgent, stats }: KpiCardWrapp
           Bienvenido, {userName}
         </h1>
         <p className="text-sm text-muted-foreground capitalize">{today}</p>
-      </motion.div>
+      </motion.div> */}
 
       {/* KPI Cards Grid */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">

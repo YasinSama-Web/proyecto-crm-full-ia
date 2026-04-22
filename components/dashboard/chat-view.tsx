@@ -1,12 +1,15 @@
 "use client"
 
 import type React from "react"
-import { useState, Fragment, useEffect, useRef, useMemo  } from "react"
+import { useState, Fragment, useEffect, useRef, useMemo, memo, useCallback  } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Bot, Send, Loader2, PanelRightClose, PanelRight, CheckCheck, Check,
   RefreshCcw, Paperclip, X, Sparkles, CheckCircle, UserPlus, Smile, Mic, CheckCircle2,
-  MoreVertical, LogOut, Info, FileText, ExternalLink, FileDown, ChevronLeft, ZoomIn, Download, Pause, Trash2, Reply, ChevronDown, XCircle, DollarSign, TrendingUp, Brain
+  MoreVertical, LogOut, Info, FileText, ExternalLink, FileDown, ChevronLeft, ZoomIn, Download, Pause, Trash2, Reply, ChevronDown, XCircle, DollarSign, TrendingUp, Brain,
+  Target,
+  Badge,
+  Facebook
 } from "lucide-react"
 import type { Conversacion, Mensaje } from "@/lib/db-types"
 import { useSocket } from "@/hooks/use-socket"
@@ -26,6 +29,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 
 // 🔥 CORRECCIÓN: Importación correcta desde tus componentes de UI locales
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Label } from "recharts"
+import { Input } from "../ui/input"
 
 type ConversacionConStatus = Conversacion & {
   lead_score?: number | null; 
@@ -88,6 +93,130 @@ const handleDownloadFile = async (url: string, filename: string) => {
   }
 };
 
+const MessageBubble = memo(function MessageBubble({
+  msg,
+  nextMsg,
+  conversation,
+  highlightedMsgId,
+  onReply,
+  onScrollTo
+}: {
+  msg: MensajeExtendido;
+  nextMsg?: MensajeExtendido;
+  conversation: ConversacionConStatus;
+  highlightedMsgId: string | null;
+  onReply: (msg: MensajeExtendido) => void;
+  onScrollTo: (id?: string) => void;
+}) {
+  const isIncoming = msg.is_incoming === true;
+  const isHighlighted = highlightedMsgId === msg.id;
+  const isSystemMsg = msg.content?.startsWith('🟣') || msg.type === 'system';
+
+  const showDateSeparator = !nextMsg || 
+    new Date(msg.timestamp).toDateString() !== new Date(nextMsg.timestamp).toDateString();
+
+  return (
+    <div className="px-4 py-0.5">
+      {showDateSeparator && (
+        <div className="flex w-full justify-center my-4">
+          <span className="bg-background/80 backdrop-blur-sm text-muted-foreground text-[11px] font-medium px-3 py-1 rounded-full border shadow-sm">
+            {formatDateSeparator(msg.timestamp)}
+          </span>
+        </div>
+      )}
+
+      <div
+        data-whatsapp-id={msg.whatsapp_id}
+        id={`msg-${msg.id}`}
+        className={`flex w-full ${isSystemMsg ? "justify-center my-3" : isIncoming ? "justify-start" : "justify-end"} group contain-layout`}
+      >
+        <div
+        
+        style={{ 
+    contain: 'layout style paint', 
+    contentVisibility: 'auto',
+    // Solo transicionar lo necesario, no "all"
+    transition: isHighlighted ? 'box-shadow 0.3s ease, transform 0.3s ease' : 'none'
+  }}
+        className={`px-3 py-1.5 max-w-[85%] md:max-w-[70%] text-[15px] rounded-lg shadow-sm relative 
+          ${isSystemMsg
+            ? "bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200 border border-violet-200 dark:border-violet-800 text-center text-sm shadow-none"
+            : isIncoming
+              ? "bg-card text-foreground"
+              : (msg.is_receipt && msg.processed_by_ai !== true)
+                ? "bg-blue-600 text-white"
+                : "bg-emerald-600 text-white"
+          }
+          ${isHighlighted ? "ring-4 ring-emerald-400 scale-[1.02] shadow-2xl z-50 bg-emerald-100 dark:bg-emerald-900/80" : ""}
+        `}>
+          
+          {!isSystemMsg && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className={`absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded-full bg-black/20 text-white z-20 cursor-pointer`}>
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-32">
+                <DropdownMenuItem onClick={() => onReply(msg)} className="cursor-pointer">
+                  <Reply className="w-4 h-4 mr-2" /> Responder
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
+          {conversation.is_group && isIncoming && msg.sender_name && !isSystemMsg && (
+            <p className="text-[10px] font-bold text-orange-500 mb-0.5 mt-1">{msg.sender_name}</p>
+          )}
+
+          {(msg.quoted_content && msg.quoted_content !== "null" && msg.quoted_content !== "undefined") && !isSystemMsg && (
+            <div 
+              onClick={() => onScrollTo(msg.quoted_message_id)}
+              className={`mt-1 mb-1.5 p-1.5 rounded text-xs border-l-4 opacity-90 cursor-pointer hover:opacity-100 transition-opacity ${isIncoming ? 'bg-gray-100 dark:bg-gray-800 border-emerald-500 text-gray-700' : 'bg-emerald-700 border-emerald-300 text-emerald-50'}`}
+            >
+              <span className="font-bold block mb-0.5 text-[10px] opacity-80 cursor-pointer">
+                {msg.quoted_participant?.includes('me') ? 'Tú' : (msg.quoted_participant?.includes(conversation.contact_phone || 'x') ? conversation.contact_name : 'Usuario')}
+              </span>
+              <span className="truncate block max-w-[200px] italic cursor-pointer">{msg.quoted_content}</span>
+            </div>
+          )}
+
+          {msg.type === 'image' || msg.media_url ? (
+            <div className={msg.quoted_content ? "mt-1" : ""}>
+              <ImageMessageWithAI message={msg} fbcid={(conversation as any).marketing_fbcid} imageSource={msg.media_url || msg.content} conversationId={conversation.id} isIncoming={isIncoming} />
+            </div>
+          ) : msg.type === 'audio' ? (
+            <div className={msg.quoted_content ? "mt-1" : ""}>
+              <AudioMessage src={msg.content} isIncoming={isIncoming} />
+            </div>
+          ) : msg.type === 'document' ? (
+            <div className={`mt-1 min-w-[200px] ${msg.quoted_content ? "mt-1" : ""}`}>
+              <DocumentMessage message={msg} fbcid={(conversation as any).marketing_fbcid} conversationId={conversation.id} isIncoming={isIncoming} />
+            </div>
+          ) : (
+            <p className={`text-[14.5px] leading-[1.35] whitespace-pre-wrap break-words overflow-wrap-anywhere pt-0.5 ${isSystemMsg ? 'font-medium' : ''}`}>
+              {formatMessageText(msg.content)}
+            </p>
+          )}
+
+          {!isSystemMsg && (
+            <div className={`flex items-center gap-1 justify-end mt-1 text-[10px] ${
+              isIncoming 
+                ? "text-muted-foreground" 
+                : (msg.is_receipt && msg.processed_by_ai !== true)
+                  ? "text-blue-100" 
+                  : "text-emerald-100"
+            }`}>
+              {new Date(msg.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+              {!isIncoming && <MessageStatus status={msg.status} />}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
 function ImageLightbox({ src, open, onOpenChange }: { src: string, open: boolean, onOpenChange: (open: boolean) => void }) {
   const filename = `imagen-${Date.now()}.jpg`;
 
@@ -119,7 +248,7 @@ function ImageLightbox({ src, open, onOpenChange }: { src: string, open: boolean
   );
 }
 
-function DocumentMessage({ message, isIncoming, conversationId }: { message: MensajeExtendido, isIncoming: boolean, conversationId: string }) {
+function DocumentMessage({ message, isIncoming, conversationId, fbclid }: { message: MensajeExtendido, isIncoming: boolean, conversationId: string }) {
   const fileUrl = message.media_url || message.content;
   const rawFilename = fileUrl ? fileUrl.split('/').pop()?.split('?')[0] || "Documento" : "Documento";
   let cleanFilename = decodeURIComponent(rawFilename).replace(/^(inbound|self)-doc-[^-]+-\d+-/, '');
@@ -131,7 +260,7 @@ function DocumentMessage({ message, isIncoming, conversationId }: { message: Men
   const [loading, setLoading] = useState(false);
   const [localData, setLocalData] = useState({ amount: message.amount, processed: message.processed_by_ai });
 
-  const handleAnalyzePDF = async () => {
+const handleAnalyzePDF = async () => {
     setLoading(true);
     Swal.fire({ title: 'Analizando PDF...', html: 'Extrayendo texto bancario 🤖', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
@@ -143,21 +272,60 @@ function DocumentMessage({ message, isIncoming, conversationId }: { message: Men
       const data = await res.json();
       
       if (data.success) {
+        
+        // 🔥 BLOQUE CAPI CONDICIONAL 🔥
+        const capiHtml = fbcid ? `
+          <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 12px; border-radius: 8px; margin-bottom: 15px; text-align: left;">
+            <p style="font-size: 13px; color: #1e40af; margin: 0 0 4px 0;"><strong>🎯 ¡Tráfico de Meta Ads Detectado!</strong></p>
+            <p style="font-size: 12px; color: #3b82f6; margin: 0 0 6px 0;">ID Sesión: <code style="background: #dbeafe; padding: 2px 4px; border-radius: 4px;">${fbcid.substring(0, 20)}...</code></p>
+            <p style="font-size: 11px; color: #60a5fa; margin: 0;">Se enviará a la API de conversiones.</p>
+          </div>
+          <div style="margin-top: 15px; border-top: 1px dashed #e2e8f0; padding-top: 15px;">
+            <p style="font-size: 12px; color: #64748b; margin-bottom: 8px; font-weight: bold; text-align: left;">🎯 Enriquecer PII para Meta (Opcional)</p>
+            <input id="swal-pdf-email" type="email" class="swal2-input" placeholder="Email del cliente" style="height: 36px; font-size: 14px; margin-top: 0; margin-bottom: 8px;">
+            <input id="swal-pdf-city" type="text" class="swal2-input" placeholder="Ciudad" style="height: 36px; font-size: 14px; margin-top: 0;">
+          </div>
+        ` : '';
+
         const result = await Swal.fire({
           title: data.needs_manual_review ? '⚠️ Revisión' : 'Confirmar PDF',
-          html: `<div class="text-4xl font-bold text-emerald-600">$${data.amount}</div>`,
+          html: `<div class="text-4xl font-bold text-emerald-600 mb-4">$${data.amount}</div>` + capiHtml,
           icon: data.needs_manual_review ? 'warning' : 'question',
-          showCancelButton: true, confirmButtonText: 'Confirmar Pago',
-         footer: data.remaining_credits !== undefined ? `✨ Tienes ${data.remaining_credits} créditos IA` : ''
+          showCancelButton: true, 
+          confirmButtonText: 'Confirmar Pago',
+          cancelButtonText: 'Cancelar',
+          footer: data.remaining_credits !== undefined ? `✨ Tienes ${data.remaining_credits} créditos IA` : '',
+          preConfirm: async () => {
+             // Lectura segura de los inputs
+             const emailInput = document.getElementById('swal-pdf-email') as HTMLInputElement | null;
+             const cityInput = document.getElementById('swal-pdf-city') as HTMLInputElement | null;
+             
+             const customerEmail = emailInput ? emailInput.value : undefined;
+             const customerCity = cityInput ? cityInput.value : undefined;
+
+             const res = await fetch('/api/messages/confirm-payment', { 
+               method: 'POST', 
+               headers: { 'Content-Type': 'application/json' }, 
+               body: JSON.stringify({ 
+                 messageId: message.id, 
+                 amount: data.amount, 
+                 conversationId, 
+                 needsManualReview: data.needs_manual_review, 
+                 imageUrl: fileUrl,
+                 // 🔥 Enviamos PII si existe
+                 customerEmail,
+                 customerCity
+               }) 
+             });
+             
+             if(!res.ok) throw new Error("Error en la confirmación");
+             return res.json();
+          }
         });
 
         if (result.isConfirmed) {
-            await fetch('/api/messages/confirm-payment', { 
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, 
-                body: JSON.stringify({ messageId: message.id, amount: data.amount, conversationId, needsManualReview: data.needs_manual_review, imageUrl: fileUrl }) 
-            });
             setLocalData({ amount: data.amount, processed: true });
-            Swal.fire('¡Pago registrado!', '', 'success');
+            Swal.fire({ title: '¡Pago registrado!', icon: 'success', timer: 1500, showConfirmButton: false });
         }
       } else {
         Swal.fire('Atención', data.message || 'No se detectó un pago válido o no tienes créditos.', 'info');
@@ -285,7 +453,7 @@ function MessageStatus({ status }: { status?: string }) {
   return <Check className="w-3.5 h-3.5 text-white/40" /> 
 }
 
-function ImageMessageWithAI({ message, imageSource, conversationId, isIncoming }: { message: MensajeExtendido, imageSource: string, conversationId: string, isIncoming: boolean }) {
+function ImageMessageWithAI({ message, imageSource, conversationId, isIncoming, fbcid }: { message: MensajeExtendido, imageSource: string, conversationId: string, isIncoming: boolean }) {
   const [loading, setLoading] = useState(false)
   const [localData, setLocalData] = useState({ amount: message.amount, processed: message.processed_by_ai })
   const [lightboxOpen, setLightboxOpen] = useState(false)
@@ -343,11 +511,25 @@ function ImageMessageWithAI({ message, imageSource, conversationId, isIncoming }
                  <p class="text-sm text-amber-700 mt-2">El sistema ha retenido este pago por políticas de seguridad. Revise la imagen original.</p>
                  ${badgesHtml}
                </div>`
-            : `<div class="flex flex-col items-center gap-2"><div class="text-4xl font-bold text-emerald-600">$${dataAnalysis.amount}</div></div>`;
+            : `<div class="flex flex-col items-center gap-2"><div class="text-4xl font-bold text-emerald-600 mb-2">$${dataAnalysis.amount}</div></div>`;
+
+        // 🔥 BLOQUE CAPI CONDICIONAL 🔥
+        const capiHtml = fbcid ? `
+          <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 12px; border-radius: 8px; margin-bottom: 15px; text-align: left;">
+            <p style="font-size: 13px; color: #1e40af; margin: 0 0 4px 0;"><strong>🎯 ¡Tráfico de Meta Ads Detectado!</strong></p>
+            <p style="font-size: 12px; color: #3b82f6; margin: 0 0 6px 0;">ID Sesión: <code style="background: #dbeafe; padding: 2px 4px; border-radius: 4px;">${fbcid.substring(0, 20)}...</code></p>
+            <p style="font-size: 11px; color: #60a5fa; margin: 0;">Se enviará a la API de conversiones.</p>
+          </div>
+          <div style="margin-top: 15px; border-top: 1px dashed #e2e8f0; padding-top: 15px;">
+            <p style="font-size: 12px; color: #64748b; margin-bottom: 8px; font-weight: bold; text-align: left;">🎯 Enriquecer PII para Meta (Opcional)</p>
+            <input id="swal-email" type="email" class="swal2-input" placeholder="Email del cliente" style="height: 36px; font-size: 14px; margin-top: 0; margin-bottom: 8px;">
+            <input id="swal-city" type="text" class="swal2-input" placeholder="Ciudad" style="height: 36px; font-size: 14px; margin-top: 0;">
+          </div>
+        ` : '';
 
         const result = await Swal.fire({
           title: titleText,
-          html: htmlContent,
+          html: htmlContent + capiHtml, // Inyectamos el HTML dinámico aquí
           icon: iconType, 
           showCancelButton: true, 
           confirmButtonText: btnText, 
@@ -355,6 +537,13 @@ function ImageMessageWithAI({ message, imageSource, conversationId, isIncoming }
           confirmButtonColor: colorHex, 
           footer: `<span style="color: #64748b; font-size: 13px; font-weight: 500;">✨ Te quedan ${creditosRestantes} créditos IA</span>`,
           preConfirm: async () => {
+             // Lectura segura de los inputs (solo existen si fbcid es true)
+             const emailInput = document.getElementById('swal-email') as HTMLInputElement | null;
+             const cityInput = document.getElementById('swal-city') as HTMLInputElement | null;
+             
+             const customerEmail = emailInput ? emailInput.value : undefined;
+             const customerCity = cityInput ? cityInput.value : undefined;
+
              const res = await fetch('/api/messages/confirm-payment', { 
                method: 'POST', 
                headers: { 'Content-Type': 'application/json' }, 
@@ -363,7 +552,10 @@ function ImageMessageWithAI({ message, imageSource, conversationId, isIncoming }
                  amount: dataAnalysis.amount, 
                  conversationId,
                  needsManualReview: isSuspicious,
-                 imageUrl: imageSource
+                 imageUrl: imageSource,
+                 // 🔥 Enviamos PII si existe
+                 customerEmail,
+                 customerCity
                }) 
              })
              if(!res.ok) throw new Error("DB Error");
@@ -377,30 +569,31 @@ function ImageMessageWithAI({ message, imageSource, conversationId, isIncoming }
            setLocalData({ amount: dataAnalysis.amount, processed: true })
         }
       } else { 
-        if (dataAnalysis.error === "insufficient_credits") {
-            Swal.fire({
-              title: '¡Sin mensajes de IA!',
-              html: `No te quedan más mensajes de IA en tu plan.<br><br>
-                     Puedes esperar a que se renueve tu plan para obtener los mensajes que incluye, o bien puedes <b>comprar packs extra</b> aquí.<br><br>
-                     <span style="font-size: 12px; color: #64748b;">En caso de que quieras esperar, siempre puedes registrar tus ventas de forma manual en el módulo "Ventas".</span>`,
-              icon: 'warning',
-              showCancelButton: true,
-              confirmButtonText: '⚡ Comprar Packs Extra',
-              cancelButtonText: 'Cerrar',
-              confirmButtonColor: '#8b5cf6',
-            }).then((res) => {
-               if(res.isConfirmed) {
+         // ... (tu lógica original de errores se mantiene igual)
+         if (dataAnalysis.error === "insufficient_credits") {
+             Swal.fire({
+               title: '¡Sin mensajes de IA!',
+               html: `No te quedan más mensajes de IA en tu plan.<br><br>
+                      Puedes esperar a que se renueve tu plan para obtener los mensajes que incluye, o bien puedes <b>comprar packs extra</b> aquí.<br><br>
+                      <span style="font-size: 12px; color: #64748b;">En caso de que quieras esperar, siempre puedes registrar tus ventas de forma manual en el módulo "Ventas".</span>`,
+               icon: 'warning',
+               showCancelButton: true,
+               confirmButtonText: '⚡ Comprar Packs Extra',
+               cancelButtonText: 'Cerrar',
+               confirmButtonColor: '#8b5cf6',
+             }).then((res) => {
+                if(res.isConfirmed) {
                   window.dispatchEvent(new CustomEvent('open-ia-modal'));
-               }
-            });
-            setLocalData({ ...localData, processed: false })
-        } else if (dataAnalysis.error === "server_error" || !resAnalysis.ok) {
-            Swal.fire('Error del Sistema', 'Ocurrió un error interno en el servidor.', 'error');
-            setLocalData({ ...localData, processed: false })
-        } else {
-            Swal.fire({ title: 'No es un comprobante válido', text: 'La IA no detectó un pago.', icon: 'info' })
-            setLocalData({ ...localData, processed: true })
-        }
+                }
+             });
+             setLocalData({ ...localData, processed: false })
+         } else if (dataAnalysis.error === "server_error" || !resAnalysis.ok) {
+             Swal.fire('Error del Sistema', 'Ocurrió un error interno en el servidor.', 'error');
+             setLocalData({ ...localData, processed: false })
+         } else {
+             Swal.fire({ title: 'No es un comprobante válido', text: 'La IA no detectó un pago.', icon: 'info' })
+             setLocalData({ ...localData, processed: true })
+         }
       } 
     } catch (e) { 
       clearTimeout(fraudTimer);
@@ -413,10 +606,16 @@ function ImageMessageWithAI({ message, imageSource, conversationId, isIncoming }
   return (
     <div className="flex flex-col space-y-1.5 max-w-full relative group">
       <img 
-        src={imageSource || "/placeholder.svg"} 
-        alt="Mensaje" 
-        onClick={() => setLightboxOpen(true)} 
-        className="rounded-xl w-auto h-auto max-w-[240px] max-h-[300px] object-cover cursor-pointer shadow-sm transition-opacity group-hover:opacity-90" 
+          src={imageSource || "/placeholder.svg"} 
+  alt="Mensaje" 
+  loading="lazy"
+  decoding="async"
+  width={240}
+  height={300}
+  onClick={() => setLightboxOpen(true)} 
+  className="rounded-xl w-auto h-auto max-w-[240px] max-h-[300px] object-cover cursor-pointer shadow-sm transition-opacity group-hover:opacity-90" 
+  style={{ aspectRatio: 'auto' }}
+ 
       />
       
       <div className="absolute top-2 right-2 p-1.5 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
@@ -495,10 +694,18 @@ export function ChatView({ conversation, onToggleDetails, showDetails, onToggleS
   const [isChangingChat, setIsChangingChat] = useState(false);
   const [displayedConversationId, setDisplayedConversationId] = useState<string | null>(null);
 
+   const [olderMessages, setOlderMessages] = useState<MensajeExtendido[]>([]);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
   // 🔥 NUEVO: Estados para el Selector de Productos
   const [productos, setProductos] = useState<any[]>([]);
   const [productosSeleccionados, setProductosSeleccionados] = useState<{sku: string, nombre: string, cantidad: number, precio: number}[]>([]);
   const [cargandoProductos, setCargandoProductos] = useState(false);
+
+  const [saleEmail, setSaleEmail] = useState("")
+  const [saleCity, setSaleCity] = useState("")
+  const [showEnrichment, setShowEnrichment] = useState(false)
 
 useEffect(() => {
     // Si no está abierto o NO tiene el addon, no hacemos nada
@@ -574,23 +781,35 @@ useEffect(() => {
   const isResolved = status === "RESOLVED" || status === "CLOSED" || status === "ABANDONED"
   const showEnableAIBtn = currentBotState === false && hasSuperBot && !isResolved && !isInbox && !conversation?.is_group && !isAssignedToOther;
 
-  // 6. QUERIES (useQuery)
-  const { data: messages = [], isLoading: isLoadingMessages } = useQuery({
-    queryKey: ['messages', conversation?.id], 
+  const { data: recentMessages = [], isLoading: isLoadingMessages } = useQuery({
+    queryKey: ['messages', conversation?.id],
     queryFn: async () => {
-      if (!conversation?.id) return [];
+      if (!conversation?.id) return []
       try {
-        const res = await fetch(`/api/messages?conversationId=${conversation.id}`, { cache: 'no-store' });
-        if (!res.ok) throw new Error('Error fetch');
-        return await res.json() as MensajeExtendido[];
-      } catch (error) { return []; }
+        const res = await fetch(`/api/messages?conversationId=${conversation.id}&limit=30`)
+        if (!res.ok) throw new Error('Error fetch')
+        const data = await res.json() as MensajeExtendido[]
+        setHasMoreMessages(data.length === 30);
+        return data
+      } catch (error) { return [] }
     },
     enabled: !!conversation?.id,
-    staleTime: 0, 
-    refetchOnWindowFocus: true ,
-    refetchInterval: 500
-  });
+    staleTime: Infinity,
+    refetchOnMount: true,
+    refetchOnWindowFocus: false,
+  })
 
+ const allMessages = useMemo(() => {
+    const map = new Map<string, MensajeExtendido>();
+    recentMessages.forEach(m => { if (m.id) map.set(m.id, m); });
+    olderMessages.forEach(m => { if (m.id && !map.has(m.id)) map.set(m.id, m); });
+    // Orden cronológico [viejo -> nuevo]
+    return Array.from(map.values()).sort((a, b) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+  }, [olderMessages, recentMessages]);
+  
+  const sortedMessages = useMemo(() => [...allMessages].reverse(), [allMessages]);
   const showLoader = isChangingChat || (isLoadingMessages && conversation?.id === displayedConversationId);
 
   // 7. EFECTOS (useEffect)
@@ -609,7 +828,8 @@ useEffect(() => {
     if (conversation?.id && conversation.id !== displayedConversationId) {
       setIsChangingChat(true);
       setDisplayedConversationId(conversation.id);
-      
+      setOlderMessages([]);        // 🔥 Limpiar histórico al cambiar chat
+      setHasMoreMessages(true);    // 🔥 Resetear flag
       setLocalText(initialDraft || ""); 
       setReplyingTo(null);
       setOptimisticStatus(null);
@@ -633,28 +853,43 @@ useEffect(() => {
   }, [localText, onDraftChange])
 
   useEffect(() => {
-    if (!socket || !conversation?.id) return
-    const handleNewMessage = (data: any) => {
-      const incomingConvId = data.conversationId || data.conversation_id
-      if (String(incomingConvId) !== String(conversation.id)) return
-      queryClient.setQueryData(['messages', conversation.id], (old: any[] = []) => {
-         if (old.some(m => String(m.id) === String(data.message.id))) return old
-         return [...old, data.message]
-      })
-    }
-    const handleStatusUpdate = (data: any) => {
-       if (String(data.conversationId) !== String(conversation.id)) return
-       queryClient.setQueryData(['messages', conversation.id], (old: any[] = []) => {
-          return old.map(m => String(m.id) === String(data.messageId) ? { ...m, status: data.status, is_read: data.status === 'read' } : m)
-       })
-    }
-    socket.on('new_message', handleNewMessage)
-    socket.on('message_status_update', handleStatusUpdate)
-    return () => {
-      socket.off('new_message', handleNewMessage)
-      socket.off('message_status_update', handleStatusUpdate)
-    }
-  }, [socket, conversation?.id, queryClient])
+  if (!socket || !conversation?.id) return
+  
+      const handleNewMessage = (data: any) => {
+    const incomingConvId = data.conversationId || data.conversation_id
+    if (String(incomingConvId) !== String(conversation.id)) return
+    queryClient.setQueryData(['messages', conversation.id], (old: MensajeExtendido[] = []) => {
+      if (!old) return [data.message];
+      // 🔥 Validación estricta: ambos IDs deben existir para comparar
+      const exists = old.some(m => 
+        (m.id && data.message?.id && String(m.id) === String(data.message.id)) || 
+        (m.whatsapp_id && data.message?.whatsapp_id && m.whatsapp_id === data.message.whatsapp_id)
+      );
+      if (exists) return old;
+      setTimeout(() => {
+         document.getElementById('final-del-chat')?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+      return [...old, data.message];
+    })
+  }
+  
+  const handleStatusUpdate = (data: any) => {
+    if (String(data.conversationId) !== String(conversation.id)) return
+    queryClient.setQueryData(['messages', conversation.id], (old: any[] = []) =>
+      old.map(m => String(m.id) === String(data.messageId)
+        ? { ...m, status: data.status, is_read: data.status === 'read' }
+        : m
+      )
+    )
+  }
+  
+  socket.on('new_message', handleNewMessage)
+  socket.on('message_status_update', handleStatusUpdate)
+  return () => {
+    socket.off('new_message', handleNewMessage)
+    socket.off('message_status_update', handleStatusUpdate)
+  }
+}, [socket, conversation?.id, queryClient])
 
   // 8. HANDLERS Y FUNCIONES
   const handleScrollToMessage = (messageId?: string) => {
@@ -735,8 +970,7 @@ useEffect(() => {
     const currentReplyingTo = replyingTo;
     setReplyingTo(null);
 
-    // 2. HACEMOS EL TRABAJO PESADO DE FONDO
-    try {
+   try {
       if (fileToSend) {
         const fileUrl = await uploadImage(fileToSend) 
         if (!fileUrl) throw new Error("Error subiendo archivo")
@@ -753,8 +987,28 @@ useEffect(() => {
       }) 
       
       if (res && res.error) throw new Error(res.error);
+
+      // 🔥 LA MAGIA PERDIDA: Si era una imagen/documento, la dibujamos AHORA MISMO
+      if (fileToSend) {
+         const msgMedia: MensajeExtendido = {
+            id: uniqueId, conversation_id: conversation.id, content: messageContent, type: messageType,
+            is_incoming: false, timestamp: new Date(), status: 'sent', usuario_id: 'me', is_read: false, 
+            media_url: messageType === 'image' ? messageContent : null
+         };
+         queryClient.setQueryData(['messages', conversation.id], (old: any[] = []) => [...old, msgMedia]);
+         
+         // Scrolleamos hacia abajo suavemente para ver la foto
+         setTimeout(() => {
+            document.getElementById('final-del-chat')?.scrollIntoView({ behavior: 'smooth' });
+         }, 100);
+      }
       
-      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.setQueryData(['conversations'], (old: any[] = []) =>
+  old.map(c => c.id === conversation.id
+    ? { ...c, last_message: currentText || '📎 Archivo', last_message_is_incoming: false, last_activity: new Date().toISOString() }
+    : c
+  )
+)
 
     } catch (error: any) { 
         console.error("🚨 ERROR EN FRONTEND:", error);
@@ -858,6 +1112,19 @@ const startRecording = async () => {
                   mobileId: uniqueId, quotedMessageId: replyingTo?.whatsapp_id || replyingTo?.id,
                   quotedParticipant: replyingTo?.sender_phone || (replyingTo?.is_incoming ? conversation.contact_phone : 'me')
               });
+
+              // 🔥 LA MAGIA PERDIDA: Dibujamos el audio recién enviado en la pantalla
+              const msgAudio: MensajeExtendido = {
+                  id: uniqueId, conversation_id: conversation.id, content: base64Audio, type: 'audio',
+                  is_incoming: false, timestamp: new Date(), status: 'sent', usuario_id: 'me', is_read: false, media_url: null
+              };
+              queryClient.setQueryData(['messages', conversation.id], (old: any[] = []) => [...old, msgAudio]);
+              
+              // Scrolleamos hacia abajo suavemente para ver el audio
+              setTimeout(() => {
+                 document.getElementById('final-del-chat')?.scrollIntoView({ behavior: 'smooth' });
+              }, 100);
+
               setReplyingTo(null); setSending(false); setTempContent(null);
           };
       } catch (error) { setSending(false); setTempContent(null); }
@@ -875,7 +1142,9 @@ const changeConversationStatus = async (newStatus: "OPEN" | "RESOLVED" | "ABANDO
           
           await new Promise(resolve => setTimeout(resolve, 800));
           setOptimisticStatus(newStatus); 
-          queryClient.invalidateQueries({ queryKey: ['conversations'] });
+          queryClient.setQueryData(['conversations'], (old: any[] = []) =>
+  old.map(c => c.id === conversation.id ? { ...c, status: newStatus } : c)
+)
           if (onToggleStatus) onToggleStatus(newStatus);
       } catch (error) { 
           console.error(error) 
@@ -897,7 +1166,9 @@ const changeConversationStatus = async (newStatus: "OPEN" | "RESOLVED" | "ABANDO
           setOptimisticBotEnabled(true);
           await new Promise(resolve => setTimeout(resolve, 800));
           
-          queryClient.invalidateQueries({ queryKey: ['conversations'] });
+          queryClient.setQueryData(['conversations'], (old: any[] = []) =>
+  old.map(c => c.id === conversation.id ? { ...c, bot_enabled: true } : c)
+)
           
           Swal.fire({
               title: '¡IA Reactivada!',
@@ -928,19 +1199,17 @@ const handleRegisterSale = async () => {
         contactName: conversation.contact_name,
         amount: Number(saleAmount),
         descripcion: saleConcept,
-        // 🔥 NUEVO: Enviamos el array de SKUs al backend
-        productos_skus: productosSeleccionados.map(p => `${p.cantidad}x ${p.sku}`) 
+        productos_skus: productosSeleccionados.map(p => `${p.cantidad}x ${p.sku}`),
+        // 🔥 NUEVO: Enviamos el PII opcional
+        customerEmail: saleEmail || undefined,
+        customerCity: saleCity || undefined
       });
       
       setIsSaleModalOpen(false);
-      setSaleAmount("");
-      setSaleConcept("");
-      setProductosSeleccionados([]); // Limpiamos
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsSubmittingSale(false);
-    }
+      setSaleAmount(""); setSaleConcept(""); setProductosSeleccionados([]); 
+      setSaleEmail(""); setSaleCity(""); setShowEnrichment(false); // Limpiamos
+    } catch (error) { console.error(error); } 
+    finally { setIsSubmittingSale(false); }
   }
 
   // 🔥 NUEVAS FUNCIONES PARA EL MINI CARRITO MANUAL
@@ -964,6 +1233,40 @@ const handleRegisterSale = async () => {
     actualizarCarrito(nuevaLista);
   };
 
+      const messagesContainerRef = useRef<HTMLDivElement>(null);
+
+  const loadMoreMessages = useCallback(async () => {
+    if (!conversation?.id || isLoadingMore || !hasMoreMessages) return;
+    
+    const container = messagesContainerRef.current;
+    const oldScrollHeight = container?.scrollHeight || 0;
+    
+    setIsLoadingMore(true);
+    try {
+      const oldest = allMessages[0];
+      const beforeParam = oldest?.timestamp 
+        ? `&before=${encodeURIComponent(new Date(oldest.timestamp).toISOString())}` 
+        : '';
+      const res = await fetch(`/api/messages?conversationId=${conversation.id}${beforeParam}&limit=30`);
+      const data = await res.json() as MensajeExtendido[];
+      if (data.length === 0 || data.length < 30) setHasMoreMessages(false);
+      setOlderMessages(prev => [...data, ...prev]);
+      
+      // 🔥 SCROLL ANCHORING: mantener la vista exactamente donde estaba
+      requestAnimationFrame(() => {
+        if (container) {
+          const newScrollHeight = container.scrollHeight;
+          container.scrollTop = container.scrollTop + (newScrollHeight - oldScrollHeight);
+        }
+      });
+      
+    } catch (e) {
+      console.error('Error cargando más mensajes:', e);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [conversation?.id, allMessages, isLoadingMore, hasMoreMessages]);
+
 
   return (
     <div className="flex flex-col h-full w-full bg-muted/20 relative overflow-hidden">
@@ -972,21 +1275,31 @@ const handleRegisterSale = async () => {
       <div className="flex items-center justify-between px-2 md:px-4 py-3 pt-4 md:pt-6 bg-background/80 backdrop-blur-md border-b border-border shrink-0 z-10 shadow-sm">
         
         {/* Lado Izquierdo: Info del contacto */}
-        <div className="flex items-center gap-2 md:gap-3 min-w-0">
-          {onBack && (<Button variant="ghost" size="icon" className="md:hidden h-9 w-9 shrink-0 cursor-pointer" onClick={onBack}><ChevronLeft className="h-5 w-5" /></Button>)}
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted font-bold text-base shrink-0">
-              {(conversation.contact_name?.[0] || conversation.contact_phone?.[0] || "#").toUpperCase()}
+          <div className="flex items-center gap-2 md:gap-3 min-w-0">
+            {onBack && (<Button variant="ghost" size="icon" className="md:hidden h-9 w-9 shrink-0 cursor-pointer" onClick={onBack}><ChevronLeft className="h-5 w-5" /></Button>)}
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted font-bold text-base shrink-0">
+                {(conversation.contact_name?.[0] || conversation.contact_phone?.[0] || "#").toUpperCase()}
+            </div>
+            <div className="min-w-0 flex flex-col">
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-foreground text-sm md:text-base truncate">{conversation.contact_name || conversation.contact_phone}</h3>
+                
+                {/* 🔥 NUEVO: EL BADGE DE META ADS EN EL HEADER 🔥 */}
+                {(conversation as any).marketing_fbcid && (
+                  <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-200 h-5 px-1.5 text-[10px] uppercase font-bold flex items-center gap-1" title={`ID de Meta: ${(conversation as any).marketing_fbcid}`}>
+                    <Facebook className="w-3 h-3" /> Meta Ads
+                  </Badge>
+                )}
+              </div>
+              
+              <p className="text-xs md:text-sm text-muted-foreground truncate">{conversation.contact_phone}</p>
+              {transferInfo && (
+                <span className="text-[10px] bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full border border-violet-200 mt-0.5 inline-block">
+                  Transferido por ti {transferInfo.note && `• ${transferInfo.note}`}
+                </span>
+              )}
+            </div>
           </div>
-          <div className="min-w-0">
-            <h3 className="font-semibold text-foreground text-sm md:text-base truncate">{conversation.contact_name || conversation.contact_phone}</h3>
-            <p className="text-xs md:text-sm text-muted-foreground truncate">{conversation.contact_phone}</p>
-            {transferInfo && (
-              <span className="text-[10px] bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full border border-violet-200 mt-0.5 inline-block">
-                Transferido por ti {transferInfo.note && `• ${transferInfo.note}`}
-              </span>
-            )}
-          </div>
-        </div>
         
         {/* Lado Derecho: Botones de Acción */}
         <div className="flex gap-2 items-center">
@@ -1056,7 +1369,11 @@ const handleRegisterSale = async () => {
 
       {/* ÁREA DE MENSAJES */}
       <div className="flex-1 flex flex-col min-h-0 relative bg-[#efeae2] dark:bg-[#0b141a]">
-          <div className="absolute inset-0 z-0 opacity-40 mix-blend-multiply dark:mix-blend-overlay bg-fixed bg-center" style={{ backgroundImage: "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')" }} />
+          <div className="absolute inset-0 z-0 opacity-[0.06] dark:opacity-[0.03] pointer-events-none" 
+     style={{ 
+       backgroundImage: "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')",
+       backgroundRepeat: 'repeat',
+     }} />
 
           {showLoader && (
               <div className="absolute inset-0 z-20 bg-[#efeae2] dark:bg-[#0b141a] flex flex-col items-center justify-center">
@@ -1065,122 +1382,46 @@ const handleRegisterSale = async () => {
               </div>
           )}
 
-          {!showLoader && (
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col-reverse gap-2 relative z-10">
-                <AnimatePresence>
-                    {tempContent && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex w-full justify-end">
-                        <div className="px-3 py-1.5 max-w-[85%] bg-emerald-600 text-white rounded-lg opacity-70">
-                            {uploadingImage ? <Loader2 className="w-4 h-4 animate-spin"/> : <p>{tempContent}</p>}
-                        </div>
-                    </motion.div>
-                    )}
+                    {!showLoader && (
+           <div ref={messagesContainerRef}  style={{ overscrollBehavior: 'contain' }} className="flex-1 overflow-y-auto p-4 flex flex-col-reverse gap-1 relative z-10 scroll-smooth">
+  
+  {/* 🔥 EL ANCLA AHORA VA AQUÍ (Al usar flex-col-reverse, esto se pega al FONDO visual del chat) */}
+  <div id="final-del-chat" className="h-1 shrink-0 w-full"></div>
 
-                    {messages.slice().reverse().map((msg: MensajeExtendido, index: number, arr: MensajeExtendido[]) => {
-    const isIncoming = msg.is_incoming === true
-    const isHighlighted = highlightedMsgId === msg.id 
-    const isSystemMsg = msg.content?.startsWith('🟣') || msg.type === 'system';
-
-    const nextMsg = arr[index + 1]; 
-    let showDateSeparator = false;
-    let dateSeparatorText = "";
-
-    if (!nextMsg) {
-        showDateSeparator = true;
-        dateSeparatorText = formatDateSeparator(msg.timestamp);
-    } else {
-        const currDate = new Date(msg.timestamp).toDateString();
-        const prevDate = new Date(nextMsg.timestamp).toDateString();
-        if (currDate !== prevDate) {
-            showDateSeparator = true;
-            dateSeparatorText = formatDateSeparator(msg.timestamp);
-        }
-    }
-
-    return (
-        <Fragment key={msg.id}>
-            <motion.div 
-                data-whatsapp-id={msg.whatsapp_id}
-                id={`msg-${msg.id}`} 
-                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} 
-                className={`flex w-full ${isSystemMsg ? "justify-center my-3" : isIncoming ? "justify-start" : "justify-end"} group`}
-            >
-                <div className={`px-3 py-1.5 max-w-[85%] md:max-w-[70%] text-[15px] rounded-lg shadow-sm relative transition-all duration-700 
-                    ${isSystemMsg 
-                        ? "bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200 border border-violet-200 dark:border-violet-800 text-center text-sm shadow-none" 
-                        : isIncoming 
-                            ? "bg-card text-foreground" 
-                            : (msg.is_receipt && msg.processed_by_ai !== true)
-                                ? "bg-blue-600 text-white" 
-                                : "bg-emerald-600 text-white" 
-                    }
-                    ${isHighlighted ? "ring-4 ring-emerald-400 scale-[1.02] shadow-2xl z-50 bg-emerald-100 dark:bg-emerald-900/80" : ""}
-                `}>
-                    
-                    {!isSystemMsg && (
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <button className={`absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded-full bg-black/20 text-white z-20 cursor-pointer`}><ChevronDown className="w-4 h-4" /></button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-32">
-                            <DropdownMenuItem onClick={() => setReplyingTo(msg)} className="cursor-pointer"><Reply className="w-4 h-4 mr-2" /> Responder</DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                    )}
-
-                    {conversation.is_group && isIncoming && msg.sender_name && !isSystemMsg && <p className="text-[10px] font-bold text-orange-500 mb-0.5 mt-1">{msg.sender_name}</p>}
-
-                    {(msg.quoted_content && msg.quoted_content !== "null" && msg.quoted_content !== "undefined") && !isSystemMsg && (
-                        <div 
-                            onClick={() => handleScrollToMessage(msg.quoted_message_id)}
-                            className={`mt-1 mb-1.5 p-1.5 rounded text-xs border-l-4 opacity-90 cursor-pointer hover:opacity-100 transition-opacity ${isIncoming ? 'bg-gray-100 dark:bg-gray-800 border-emerald-500 text-gray-700' : 'bg-emerald-700 border-emerald-300 text-emerald-50'}`}
-                        >
-                            <span className="font-bold block mb-0.5 text-[10px] opacity-80 cursor-pointer">{msg.quoted_participant?.includes('me') ? 'Tú' : (msg.quoted_participant?.includes(conversation.contact_phone || 'x') ? conversation.contact_name : 'Usuario')}</span>
-                            <span className="truncate block max-w-[200px] italic cursor-pointer">{msg.quoted_content}</span>
-                        </div>
-                    )}
-
-                    {msg.type === 'image' || msg.media_url ? (
-    <div className={msg.quoted_content ? "mt-1" : ""}><ImageMessageWithAI message={msg} imageSource={msg.media_url || msg.content} conversationId={conversation.id} isIncoming={isIncoming} /></div>
-) : msg.type === 'audio' ? (
-    <div className={msg.quoted_content ? "mt-1" : ""}><AudioMessage src={msg.content} isIncoming={isIncoming} /></div>
-) : msg.type === 'document' ? (
-    <div className={`mt-1 min-w-[200px] ${msg.quoted_content ? "mt-1" : ""}`}>
-        <DocumentMessage message={msg} conversationId={conversation.id} isIncoming={isIncoming} />
+  {tempContent && (
+    <div className="flex w-full justify-end px-4 py-3 animate-in fade-in">
+      <div className="px-4 py-2 bg-emerald-600/80 text-white rounded-lg rounded-tr-sm shadow-sm flex items-center gap-2 animate-pulse">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        <span className="text-sm font-medium">{tempContent}</span>
+      </div>
     </div>
-) : (
-                        <p className={`text-[14.5px] leading-[1.35] whitespace-pre-wrap break-words overflow-wrap-anywhere pt-0.5 ${isSystemMsg ? 'font-medium' : ''}`}>
-                            {formatMessageText(msg.content)}
-                        </p>
-                    )}
+  )}
 
-                    {!isSystemMsg && (
-                        <div className={`flex items-center gap-1 justify-end mt-1 text-[10px] ${
-                            isIncoming 
-                                ? "text-muted-foreground" 
-                                : (msg.is_receipt && msg.processed_by_ai !== true)
-                                    ? "text-blue-100" 
-                                    : "text-emerald-100"
-                        }`}>
-                            {new Date(msg.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
-                            {!isIncoming && <MessageStatus status={msg.status} />}
-                        </div>
-                    )}
-                </div>
-            </motion.div>
-
-            {showDateSeparator && (
-                <div className="flex w-full justify-center my-4 relative z-10">
-                    <span className="bg-background/80 backdrop-blur-sm text-muted-foreground text-[11px] font-medium px-3 py-1 rounded-full border shadow-sm">
-                        {dateSeparatorText}
-                    </span>
-                </div>
-            )}
-        </Fragment>
-    )
-})}
-                </AnimatePresence>
-              </div>
+  {sortedMessages.map((msg, index) => (
+    <MessageBubble
+      key={msg.whatsapp_id || msg.id || index} // Asegúrate de tener este key
+      msg={msg}
+      nextMsg={sortedMessages[index + 1]}
+      conversation={conversation}
+      highlightedMsgId={highlightedMsgId}
+      onReply={setReplyingTo}
+      onScrollTo={handleScrollToMessage}
+    />
+  ))}
+  {hasMoreMessages && (
+    <div className="flex justify-center py-3">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={loadMoreMessages}
+        disabled={isLoadingMore}
+        className="bg-background/80 backdrop-blur-sm shadow-sm border"
+      >
+        {isLoadingMore ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : "Cargar más mensajes"}
+      </Button>
+    </div>
+  )}
+</div>
           )}
       </div>
 
@@ -1465,9 +1706,29 @@ const handleRegisterSale = async () => {
 
               <div className="p-3 bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800/50 rounded-lg flex gap-3">
                  <span className="text-orange-500 text-lg leading-none mt-0.5">⚠️</span>
-                 <p className="text-[11px] text-orange-800 dark:text-orange-300 leading-tight">
-                   <b>Auditoría:</b> Este pago manual impactará en el sistema y descontará el stock de los productos seleccionados, pero <b>no pasará por el filtro anti-fraude de la IA</b>.
-                 </p>
+                 <div className="border-t border-border pt-3 mt-4">
+                <Button variant="ghost" size="sm" onClick={() => setShowEnrichment(!showEnrichment)} className="w-full flex justify-between items-center text-blue-600 hover:text-blue-700 bg-blue-50/50 hover:bg-blue-50">
+                  <span className="flex items-center gap-2"><Target className="w-4 h-4" /> Enriquecer Venta para Meta Ads (Opcional)</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${showEnrichment ? "rotate-180" : ""}`} />
+                </Button>
+                
+                <AnimatePresence>
+                  {showEnrichment && (
+                    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                      <div className="grid grid-cols-2 gap-4 p-3 mt-2 bg-slate-50 dark:bg-slate-900/50 rounded-xl border">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-slate-500">Email del Cliente</Label>
+                          <Input type="email" placeholder="cliente@email.com" value={saleEmail} onChange={(e) => setSaleEmail(e.target.value)} className="h-8 text-xs bg-white" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-slate-500">Ciudad</Label>
+                          <Input placeholder="Ej: Mendoza" value={saleCity} onChange={(e) => setSaleCity(e.target.value)} className="h-8 text-xs bg-white" />
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
               </div>
 
             </div> 

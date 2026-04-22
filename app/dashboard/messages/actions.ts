@@ -4,7 +4,7 @@ import { sql } from "@/lib/db"
 import { requireAuth } from "@/lib/auth-middleware"
 import { revalidatePath } from "next/cache"
 import { randomUUID } from 'crypto';
-
+import { createPendingCAPIEvent } from "@/app/dashboard/marketing/action";
 // Función auxiliar para esperar (Paciencia)
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
@@ -30,6 +30,7 @@ export async function sendMessage({
   quotedContent?: string | null
 }) {
   const user = await requireAuth()
+  
   
   try {
     // 1. OBTENER DATOS + ESTADO DE LA LÍNEA
@@ -276,28 +277,24 @@ export async function registerSaleFromChat(data: {
   contactName?: string;
   amount: number;
   descripcion?: string;
-  productos_skus?: string[]; // 🔥 NUEVO: Recibimos los productos del frontend
+  productos_skus?: string[]; 
 }) {
   const user = await requireAuth();
-  const agentId = user.id; // 🔥 EL AGENTE QUE CERRÓ LA VENTA
-  const rootOwnerId = user.rootOwnerId; // El dueño del negocio
+  const agentId = user.id; 
+  const rootOwnerId = user.rootOwnerId; 
 
   try {
-    // 1. Buscar la última columna del pipeline (La de "Ventas / Cerrado")
-    const lastStageRes = await sql`
-        SELECT id 
-        FROM pipeline_stages 
-        WHERE usuario_id = ${rootOwnerId} 
-        ORDER BY order_index DESC 
-        LIMIT 1
-    `;
+    // 1. Buscar la última columna del pipeline 
+    const lastStageRes = await sql`SELECT id FROM pipeline_stages WHERE usuario_id = ${rootOwnerId} ORDER BY order_index DESC LIMIT 1`;
     const targetStageId = lastStageRes.length > 0 ? lastStageRes[0].id : null;
 
-    // 2. Buscar el contacto en el CRM (Pipeline)
-    const existingContact = await sql`SELECT id FROM "Contact" WHERE phone = ${data.contactPhone} AND usuario_id = ${rootOwnerId}`;
+    // 2. Buscar el contacto en el CRM
+    const existingContact = await sql`SELECT id, email, city FROM "Contact" WHERE phone = ${data.contactPhone} AND usuario_id = ${rootOwnerId}`;
     let contactId = existingContact.length > 0 ? existingContact[0].id : null;
+    let contactEmail = existingContact.length > 0 ? existingContact[0].email : null;
+    let contactCity = existingContact.length > 0 ? existingContact[0].city : null;
 
-    // 3. Si no existe, lo creamos rápido y LO ASIGNAMOS A LA COLUMNA
+    // 3. Si no existe, lo creamos
     if (!contactId) {
         contactId = 'c_' + Math.random().toString(36).substr(2, 9);
         await sql`
@@ -306,19 +303,16 @@ export async function registerSaleFromChat(data: {
         `;
     }
 
-    // 4. Actualizar el valor total del cliente, su fecha de HOY, y asegurar su columna
+    // 4. Actualizar el valor total del cliente
     if (targetStageId) {
         await sql`
           UPDATE "Contact" 
-          SET 
-            deal_value = COALESCE(deal_value, 0) + ${data.amount}, 
-            pipeline_stage_id = ${targetStageId},
-            updated_at = NOW() 
+          SET deal_value = COALESCE(deal_value, 0) + ${data.amount}, pipeline_stage_id = ${targetStageId}, updated_at = NOW() 
           WHERE id = ${contactId}
         `;
     }
 
-    // 5. Crear el "Recibo" visual en el chat (Mensaje del sistema)
+    // 5. Crear el "Recibo" visual en el chat
     const msgId = 'msg_' + Math.random().toString(36).substr(2, 9);
     const textoConcepto = data.descripcion ? ` (${data.descripcion})` : '';
     const textoFinal = `💰 Pago Manual registrado${textoConcepto}: $${data.amount}`;
@@ -328,43 +322,55 @@ export async function registerSaleFromChat(data: {
       VALUES (${msgId}, ${data.conversationId}, ${rootOwnerId}, ${textoFinal}, 'system', false, true, ${data.amount}, NOW(), false)
     `;
 
-    // 6. 🔥 INSERTAR EN TABLA VENTAS (Asignada al AGENTE Y CON PRODUCTOS) 🔥
-    const skusJson = data.productos_skus && data.productos_skus.length > 0 
-      ? JSON.stringify(data.productos_skus) 
-      : null;
+    // 6. INSERTAR EN TABLA VENTAS
+    const skusJson = data.productos_skus && data.productos_skus.length > 0 ? JSON.stringify(data.productos_skus) : null;
 
     await sql`
       INSERT INTO ventas (amount, descripcion, contact_id, conversation_id, usuario_id, origin_message_id, origen, agente_id, productos_skus)
       VALUES (${data.amount}, ${data.descripcion || null}, ${contactId}, ${data.conversationId}, ${rootOwnerId}, ${msgId}, 'humano', ${agentId}, ${skusJson}::jsonb)
     `;
 
-    // 7. 🔥 DESCONTAR STOCK REAL DE LOS PRODUCTOS 🔥
+    // 7. DESCONTAR STOCK
     if (data.productos_skus && data.productos_skus.length > 0) {
         for (const item of data.productos_skus) {
-            // Asumimos que el formato es "2x SKU-123"
             const partes = item.split('x ');
             if (partes.length === 2) {
                 const cantidad = parseInt(partes[0].trim()) || 1;
                 const sku = partes[1].trim();
-
-                // Actualizamos el stock del producto
-                await sql`
-                    UPDATE productos 
-                    SET stock = stock - ${cantidad} 
-                    WHERE sku = ${sku} AND usuario_id = ${rootOwnerId} AND stock >= ${cantidad}
-                `;
+                await sql`UPDATE productos SET stock = stock - ${cantidad} WHERE sku = ${sku} AND usuario_id = ${rootOwnerId} AND stock >= ${cantidad}`;
             }
         }
     }
 
-    // 8. Actualizar estado de la conversación
-    await sql`
+    // 8. Actualizar estado de la conversación (Y obtener el fbcid si existe)
+    const convUpdate = await sql`
       UPDATE conversaciones 
-      SET 
-        is_conversion = true,
-        conversion_amount = COALESCE(conversion_amount, 0) + ${data.amount}
+      SET is_conversion = true, conversion_amount = COALESCE(conversion_amount, 0) + ${data.amount}
       WHERE id = ${data.conversationId}
+      RETURNING marketing_fbcid
     `;
+
+    // 🔥 9. ENVIAR A LA COLA DE META CAPI (Lead Tracking) 🔥
+    try {
+      // Extraemos solo el nombre del SKU para mandarlo como ID de contenido a Meta
+      const cleanSkus = data.productos_skus ? data.productos_skus.map(item => item.split('x ')[1]) : ['manual_item'];
+      
+      await createPendingCAPIEvent({
+          eventName: 'Purchase',
+          value: data.amount,
+          contentIds: cleanSkus,
+          fbc: convUpdate.length > 0 ? convUpdate[0].marketing_fbcid : null,
+          userData: {
+              phone: data.contactPhone,
+              name: data.contactName,
+              email: contactEmail,
+              city: contactCity
+          },
+          metadata: { source: 'cajero_manual', agentId, descripcion: data.descripcion }
+      });
+    } catch (capiError) {
+      console.error("⚠️ Error enviando a cola CAPI desde manual:", capiError);
+    }
 
     revalidatePath("/dashboard/messages");
     revalidatePath("/dashboard/team"); 
