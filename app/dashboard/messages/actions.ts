@@ -103,7 +103,7 @@ export async function sendMessage({
         await sql`
           INSERT INTO mensajes (
             id, conversation_id, content, type, is_incoming, 
-            timestamp, usuario_id, marketing_fbcid, media_url, status,
+            timestamp, usuario_id, media_url, status,
             quoted_message_id, quoted_participant, quoted_content
           )
           VALUES (
@@ -350,24 +350,58 @@ export async function registerSaleFromChat(data: {
       RETURNING marketing_fbcid
     `;
 
-    // 🔥 9. ENVIAR A LA COLA DE META CAPI (Lead Tracking) 🔥
+        // 🔥 9. ENVIAR A LA COLA DE META CAPI (Lead Tracking) 🔥
     try {
-      // Extraemos solo el nombre del SKU para mandarlo como ID de contenido a Meta
-      const cleanSkus = data.productos_skus ? data.productos_skus.map(item => item.split('x ')[1]) : ['manual_item'];
+      const fbcid = convUpdate.length > 0 ? convUpdate[0].marketing_fbcid : null;
+      const fbp = convUpdate.length > 0 ? convUpdate[0].marketing_fbp : null;
       
-      await createPendingCAPIEvent({
-          eventName: 'Purchase',
-          value: data.amount,
-          contentIds: cleanSkus,
-          fbc: convUpdate.length > 0 ? convUpdate[0].marketing_fbcid : null,
-          userData: {
-              phone: data.contactPhone,
-              name: data.contactName,
-              email: contactEmail,
-              city: contactCity
-          },
-          metadata: { source: 'cajero_manual', agentId, descripcion: data.descripcion }
-      });
+      // Solo trackear en Meta si hay atribución
+      if (fbcid) {
+          // Anti-duplicado por conversation + monto + timestamp reciente (30 seg)
+          const existingEvent = await sql`
+              SELECT id FROM marketing_events 
+              WHERE conversation_id = ${data.conversationId}
+              AND event_name = 'Purchase'
+              AND conversion_value = ${data.amount}
+              AND created_at > NOW() - INTERVAL '30 seconds'
+              AND owner_id = ${rootOwnerId}
+              LIMIT 1
+          `;
+          
+          if (existingEvent.length === 0) {
+              const cleanSkus = data.productos_skus && data.productos_skus.length > 0 
+                  ? data.productos_skus.map(item => item.split('x ')[1]) 
+                  : ['manual_item'];
+              
+              await createPendingCAPIEvent({
+                  eventName: 'Purchase',
+                  value: data.amount,
+                  contentIds: cleanSkus,
+                  fbc: fbcid,
+                  fbp: fbp, // 🔥 NUEVO
+                  conversationId: data.conversationId, // 🔥 NUEVO
+                  userData: {
+                      phone: data.contactPhone,
+                      name: data.contactName || clienteNombre || 'Cliente', // 🔥 Fallback
+                      email: contactEmail,
+                      city: contactCity,
+                      country: 'ar' // 🔥 NUEVO
+                  },
+                  metadata: { 
+                      source: 'cajero_manual', 
+                      agentId, 
+                      descripcion: data.descripcion,
+                      conversationId: data.conversationId,
+                      productos_skus: data.productos_skus || []
+                  }
+              });
+              console.log("✅ Venta manual enviada a cola CAPI");
+          } else {
+              console.log("⚠️ Evento CAPI duplicado detectado, omitido");
+          }
+      } else {
+          console.log("ℹ️ Sin atribución Meta, venta registrada solo internamente");
+      }
     } catch (capiError) {
       console.error("⚠️ Error enviando a cola CAPI desde manual:", capiError);
     }

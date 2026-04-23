@@ -10,9 +10,14 @@ const sql = neon(process.env.DATABASE_URL!)
 // ==========================================
 // 🔒 UTILS: HASHING PARA META (PII)
 // ==========================================
-function hashData(data: string | undefined | null): string | undefined {
+function hashData(data: string | undefined | null, isPhone = false): string | undefined {
   if (!data) return undefined;
-  return createHash('sha256').update(data.trim().toLowerCase()).digest('hex');
+  let clean = data.trim().toLowerCase();
+  if (isPhone) {
+    clean = clean.replace(/\D/g, ''); // Solo dígitos
+    if (clean.startsWith('0')) clean = clean.substring(1); // Quitar 0 inicial argentino
+  }
+  return createHash('sha256').update(clean).digest('hex');
 }
 
 function generateRandomSlug() {
@@ -171,12 +176,15 @@ export async function createPendingCAPIEvent(data: {
   value?: number;
   contentIds?: string[];
   fbc?: string;
-  marketingLinkId?: string; // 🔥 NUEVO: Para saber de qué link vino
+  fbp?: string;              // 🔥 NUEVO
+  conversationId?: string;   // 🔥 NUEVO - para trazabilidad
+  marketingLinkId?: string;
   userData: {
     phone: string;
     name?: string;
     email?: string;
     city?: string;
+    country?: string;
   };
   metadata?: any;
 }) {
@@ -191,13 +199,18 @@ export async function createPendingCAPIEvent(data: {
     INSERT INTO marketing_events (
       id, event_id, event_name, source, status, processing_until,
       conversion_value, currency, contact_phone, contact_name, contact_email, 
-      contact_city, fbc, content_ids, metadata, owner_id, marketing_link_id
+      contact_city, contact_country, fbc, fbp, content_ids, metadata, 
+      owner_id, marketing_link_id, conversation_id   // 🔥 NUEVO
     ) VALUES (
       ${eventId}, ${eventId}, ${data.eventName || 'Purchase'}, 'whatsapp_bot', 'processing',
       ${processingUntil.toISOString()}, ${data.value || 0}, 'ARS',
       ${data.userData.phone}, ${data.userData.name || null}, ${data.userData.email || null},
-      ${data.userData.city || null}, ${data.fbc || null}, ${data.contentIds || []},
-      ${data.metadata ? JSON.stringify(data.metadata) : null}, ${user.rootOwnerId}, ${data.marketingLinkId || null}
+      ${data.userData.city || null}, ${data.userData.country || 'ar'}, 
+      ${data.fbc || null}, ${data.fbp || null}, 
+      ${data.contentIds || []},
+      ${data.metadata ? JSON.stringify(data.metadata) : null}, 
+      ${user.rootOwnerId}, ${data.marketingLinkId || null}, 
+      ${data.conversationId || null}   // 🔥 NUEVO
     )
   `;
   
@@ -266,18 +279,22 @@ export async function sendMetaCAPIEvent(eventData: any) {
 
     // Hashear PII para Meta
     const userData = {
-      ph: hashData(eventData.userData.phone),
+      ph: hashData(eventData.userData.phone, true),
       em: hashData(eventData.userData.email),
       fn: hashData(eventData.userData.name?.split(' ')[0]),
       ln: hashData(eventData.userData.name?.split(' ').slice(1).join(' ')),
       ct: hashData(eventData.userData.city),
       country: hashData(eventData.userData.country || 'ar'),
       fbc: eventData.fbc, 
-      fbp: eventData.fbp, 
+      fbp: eventData.fbp || undefined, 
     };
 
+
     // Limpiar nulos
-    Object.keys(userData).forEach(key => { if (userData[key as keyof typeof userData] === undefined) delete userData[key as keyof typeof userData] });
+     Object.keys(userData).forEach(key => { 
+    if (userData[key as keyof typeof userData] === undefined || userData[key as keyof typeof userData] === null) 
+      delete userData[key as keyof typeof userData] 
+  });
 
     const payload = {
       data: [{
@@ -315,7 +332,7 @@ export async function sendMetaCAPIEvent(eventData: any) {
     await sql`
       UPDATE marketing_events 
       SET status = 'failed', error_message = ${error.message}
-      WHERE id = ${eventData.eventId}
+      WHERE id = ${eventData.eventId} AND owner_id = ${user.rootOwnerId}
     `;
     return { success: false, error: error.message };
   }
@@ -337,26 +354,39 @@ export async function reportConversionCAPI(data: {
 }) {
   try {
     const user = await requireAuth();
-    
+    const eventId = `manual_${Date.now()}`;
+
+    await sql`
+      INSERT INTO marketing_events (
+        id, event_id, event_name, source, status, processing_until,
+        conversion_value, currency, contact_phone, contact_name, contact_email,
+        contact_city, contact_country, fbc, content_ids, owner_id
+      ) VALUES (
+        ${eventId}, ${eventId}, ${data.type === 'PURCHASE' ? 'Purchase' : 'Lead'}, 
+        'manual_capi', 'sent', NOW(),  // Manual va directo a sent (sin delay)
+        ${data.value || 0}, ${data.currency || 'ARS'},
+        ${data.phone}, ${data.name || null}, ${data.email || null},
+        ${data.city || null}, ${data.country || 'ar'},
+        ${data.eventId}, ${JSON.stringify(['manual_entry'])},
+        ${user.rootOwnerId}
+      )
+    `;
     // Llamamos directamente a tu motor (sendMetaCAPIEvent)
     const result = await sendMetaCAPIEvent({
-      // Si pegan solo el fbclid, le inventamos un eventId para la base de datos
-      eventId: data.eventId.includes('fbclid') ? data.eventId : `manual_${Date.now()}`,
+      eventId,
       eventName: data.type === 'PURCHASE' ? 'Purchase' : 'Lead',
-      value: data.value || (data.type === 'PURCHASE' ? 100 : 0),
+      value: data.value || 0,
       currency: data.currency || 'ARS',
       contentIds: ['manual_entry'],
-      fbc: data.eventId, // Aquí viaja el fbclid que pegaste en la UI
-      userData: {
-        phone: data.phone,
-        name: data.name,
-        email: data.email,
-        city: data.city,
-        country: data.country,
-      }
+      fbc: data.eventId,
+      userData: { phone: data.phone, name: data.name, email: data.email, city: data.city, country: data.country }
     });
 
-    if (!result.success) throw new Error(result.error);
+    if (!result.success) {
+      // Si falla Meta, marcar como failed pero mantener el registro
+      await sql`UPDATE marketing_events SET status = 'failed', error_message = ${result.error} WHERE id = ${eventId}`;
+      throw new Error(result.error);
+    }
 
     revalidatePath("/dashboard/marketing");
     return { success: true };

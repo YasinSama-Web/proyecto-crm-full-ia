@@ -402,6 +402,22 @@ export default function MarketingCenter() {
                 <h3 className="text-lg font-semibold text-slate-800">Lead Tracking</h3>
                 <p className="text-sm text-slate-500">Historial detallado de eventos capturados. Los eventos en cola se envían automáticamente al expirar el tiempo.</p>
               </div>
+              <div className="p-6 border-b border-slate-200/50 flex justify-between items-center">
+  
+  <Button 
+    variant="outline" 
+    size="sm" 
+    onClick={async () => {
+      setIsLoading(true);
+      await fetch('/api/cron/process-capi', { method: 'POST' }); // o llamar a processPendingEvents
+      await loadData();
+      setIsLoading(false);
+    }}
+    disabled={isLoading}
+  >
+    <Zap className="w-4 h-4 mr-1" /> Procesar cola ahora
+  </Button>
+</div>
               <div className="p-6">
                 {events.length === 0 ? (
                   <div className="text-center py-12 text-slate-500"><Target className="h-12 w-12 mx-auto mb-4 opacity-30" /><p>No hay eventos registrados</p></div>
@@ -421,9 +437,19 @@ export default function MarketingCenter() {
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                                <code className="text-xs font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded">{event.event_id.slice(0, 16)}...</code>
-                                {event.fuente && <Badge variant="outline" className="text-[10px] h-5 border-slate-300">{event.fuente}</Badge>}
-                            </div>
+  <code className="text-xs font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
+    {event.event_id.slice(0, 16)}...
+  </code>
+  {event.conversation_id && (
+    <a 
+      href={`/dashboard/messages?conv=${event.conversation_id}`}
+      className="text-[10px] text-blue-600 hover:underline font-medium"
+    >
+      Ver chat →
+    </a>
+  )}
+  {event.fuente && <Badge variant="outline" className="text-[10px] h-5">{event.fuente}</Badge>}
+</div>
                             <p className="text-xs text-slate-500 mt-1">
                               {new Date(event.created_at).toLocaleDateString("es-AR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                             </p>
@@ -445,8 +471,13 @@ export default function MarketingCenter() {
                               <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-xs font-bold">
                                 <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
                                 {countdowns[event.id] > 0 
-                                  ? `${Math.floor(countdowns[event.id] / 60)}:${String(countdowns[event.id] % 60).padStart(2, '0')}`
-                                  : "Enviando..."}
+  ? `${Math.floor(countdowns[event.id] / 60)}:${String(countdowns[event.id] % 60).padStart(2, '0')}`
+  : (
+    <span className="flex items-center gap-1 text-amber-600">
+      <Loader2 className="w-3 h-3 animate-spin" />
+      Pendiente de cron
+    </span>
+  )}
                               </div>
                               <Button variant="ghost" size="sm" onClick={() => handleCancelEvent(event.id)} className="text-red-500 hover:text-red-600 hover:bg-red-50 text-xs h-7 px-2 cursor-pointer">
                                 <Trash2 className="w-3.5 h-3.5 mr-1" /> Cancelar
@@ -517,12 +548,12 @@ export default function MarketingCenter() {
                             )}
                           </td>
                           <td className="px-6 py-3 text-center">
-                            {log.used ? (
-                              <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-none shadow-none">Convertido</Badge>
-                            ) : (
-                              <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-200 border-none shadow-none">Pendiente</Badge>
-                            )}
-                          </td>
+  {log.used ? (
+    <Badge className="bg-blue-100 text-blue-700 border-none shadow-none">Vinculado a Chat</Badge>
+  ) : (
+    <Badge className="bg-slate-100 text-slate-500 border-none shadow-none">En espera</Badge>
+  )}
+</td>
                         </tr>
                       ))
                     )}

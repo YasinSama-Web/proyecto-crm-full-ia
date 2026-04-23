@@ -544,7 +544,7 @@ function ImageMessageWithAI({ message, imageSource, conversationId, isIncoming, 
              const customerEmail = emailInput ? emailInput.value : undefined;
              const customerCity = cityInput ? cityInput.value : undefined;
 
-             const res = await fetch('/api/messages/confirm-payment', { 
+              const res = await fetch('/api/messages/confirm-payment', { 
                method: 'POST', 
                headers: { 'Content-Type': 'application/json' }, 
                body: JSON.stringify({ 
@@ -553,13 +553,12 @@ function ImageMessageWithAI({ message, imageSource, conversationId, isIncoming, 
                  conversationId,
                  needsManualReview: isSuspicious,
                  imageUrl: imageSource,
-                 // 🔥 Enviamos PII si existe
                  customerEmail,
                  customerCity
                }) 
              })
              if(!res.ok) throw new Error("DB Error");
-             await registerSale(conversationId, dataAnalysis.amount)
+             // ✅ confirm-payment ya crea la venta Y el evento CAPI. No llamar a registerSale aquí.
              return res.json()
           }
         })

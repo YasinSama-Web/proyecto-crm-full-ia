@@ -97,8 +97,8 @@ export async function POST(request: Request) {
     `
 
     // 3. Si es un comprobante, actualizamos la DB
-    if (analysis.is_receipt && analysis.amount) {
-        console.log(`💰 [AUTO] VENTA DETECTADA! Monto: $${analysis.amount} | Retención: ${analysis.needs_manual_review ? 'SÍ ⚠️' : 'NO ✅'}`)
+      if (analysis.is_receipt && analysis.amount) {
+        console.log(`💰 [AUTO] VENTA DETECTADA! Monto: $${analysis.amount}...`)
 
         await sql`
             UPDATE mensajes 
@@ -108,6 +108,35 @@ export async function POST(request: Request) {
                 needs_manual_review = ${analysis.needs_manual_review || false}
             WHERE id = ${messageId}
         `
+
+        // 🔥 NUEVO: Crear evento CAPI automático si hay atribución
+        try {
+            const convData = await sql`
+                SELECT marketing_fbcid, marketing_fbp, contact_phone 
+                FROM conversaciones 
+                WHERE id = ${conversationId}
+            `;
+            if (convData.length > 0 && convData[0].marketing_fbcid) {
+                const { createPendingCAPIEvent } = await import("@/app/dashboard/marketing/action");
+                await createPendingCAPIEvent({
+                    eventName: 'Purchase',
+                    value: analysis.amount,
+                    contentIds: ['auto_ocr'],
+                    fbc: convData[0].marketing_fbcid,
+                    fbp: convData[0].marketing_fbp,
+                    conversationId: conversationId,
+                    userData: {
+                        phone: convData[0].contact_phone,
+                        country: 'ar'
+                    },
+                    metadata: { source: 'auto_ocr_bot', messageId }
+                });
+                console.log("✅ Evento CAPI automático creado");
+            }
+        } catch (e) {
+            console.error("⚠️ Error creando evento CAPI automático:", e);
+        }
+
 
         // 4. Avisar al Frontend
         const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3000"

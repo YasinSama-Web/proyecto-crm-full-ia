@@ -16,23 +16,23 @@ export async function POST(req: Request) {
     const body = await req.json();
     console.log("📥 PING RECIBIDO EN CRM:", body); // Para ver en logs de Vercel
 
-    const { fbc, fbp, source, ownerId } = body;
+    const { fbc, fbp, source, ownerId, sessionId: clientSessionId } = body;
 
-    if (!fbc || !ownerId) {
-      return NextResponse.json({ error: "Faltan fbc u ownerId" }, { status: 400, headers: corsHeaders });
-    }
+  if (!fbc || !ownerId) {
+    return NextResponse.json({ error: "Faltan fbc u ownerId" }, { status: 400, headers: corsHeaders });
+  }
 
     // Generamos ambos IDs nosotros mismos
-    const newLogId = `log_${Math.random().toString(36).substring(2, 15)}`; // 🔥 NUEVO
-    const sessionId = `sess_${Math.random().toString(36).substring(2, 15)}`;
-    const ip = req.headers.get("x-forwarded-for")?.split(",")[0] || "0.0.0.0";
-    const userAgent = req.headers.get("user-agent") || "desconocido";
-
+  const sessionId = clientSessionId || `sess_${Math.random().toString(36).substring(2, 15)}`;
+  const newLogId = `log_${Math.random().toString(36).substring(2, 15)}`;
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0] || "0.0.0.0";
+  const userAgent = req.headers.get("user-agent") || "desconocido";
     // Intentamos guardar en la BD inyectando el ID explícitamente
     await sql`
-      INSERT INTO fbl_logs (id, session_id, fbc, fbp, ip, user_agent, source, owner_id)
-      VALUES (${newLogId}, ${sessionId}, ${fbc}, ${fbp || null}, ${ip}, ${userAgent}, ${source || "web_externa"}, ${ownerId})
-    `;
+    INSERT INTO fbl_logs (id, session_id, fbc, fbp, ip, user_agent, source, owner_id)
+    VALUES (${newLogId}, ${sessionId}, ${fbc}, ${fbp || null}, ${ip}, ${userAgent}, ${source || "web_externa"}, ${ownerId})
+    ON CONFLICT (session_id) DO NOTHING
+  `;
 
     console.log("✅ FBL GUARDADO EN NEON CON ÉXITO");
     return NextResponse.json({ success: true, sessionId }, { headers: corsHeaders });

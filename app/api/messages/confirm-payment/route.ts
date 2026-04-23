@@ -8,14 +8,15 @@ import { createPendingCAPIEvent } from "@/app/dashboard/marketing/action"
 export async function POST(req: Request) {
   try {
     const user = await requireAuth(req)
-    const { messageId, amount, conversationId, needsManualReview, imageUrl } = await req.json()
+    const { messageId, amount, conversationId, needsManualReview, imageUrl, customerEmail, customerCity } = await req.json()
 
     // 1. OBTENER DATOS DE LA CONVERSACIÓN
     const conversationData = await sql`
         SELECT 
             c.contact_phone, 
             c.source_landing_id,  
-            c.marketing_fbcid, -- 🔥 Sacamos el fbcid si el bot ya lo capturó
+            c.marketing_fbp,
+            c.marketing_fbcid, 
             COALESCE(l.nombre, o.name, 'Canal Desconocido') as line_name
         FROM conversaciones c 
         LEFT JOIN lineas_whatsapp l ON c."lineId" = l.id 
@@ -92,21 +93,45 @@ export async function POST(req: Request) {
     });
 
     // 🔥 8. ENVIAR A LA COLA DE META CAPI (Lead Tracking) 🔥
-    try {
-        await createPendingCAPIEvent({
-            eventName: 'Purchase',
-            value: amount,
-            contentIds: ['semi_auto_payment'], 
-            fbc: marketing_fbcid || null, // Se envía a Meta si lo tenemos
-            userData: {
-                phone: contact_phone,
-                name: clienteNombre !== 'Cliente Nuevo' ? clienteNombre : undefined,
-                email: clienteEmail || undefined,
-                city: clienteCity || undefined
-            },
-            metadata: { source: 'semi_auto_ai', messageId }
-        });
-        console.log("✅ Venta enviada a la cola de CAPI");
+       try {
+        if (marketing_fbcid) {
+            // Anti-duplicado: ¿ya existe evento para este messageId?
+            const existing = await sql`
+                SELECT id FROM marketing_events 
+                WHERE metadata->>'messageId' = ${messageId} 
+                AND owner_id = ${user.rootOwnerId}
+                LIMIT 1
+            `;
+            
+              if (existing.length === 0) {
+                await createPendingCAPIEvent({
+                    eventName: 'Purchase',
+                    value: amount,
+                    contentIds: ['semi_auto_payment'],
+                    fbc: marketing_fbcid,
+                    fbp: conversationData[0].marketing_fbp || null,
+                    conversationId: conversationId,
+                    userData: {
+                        phone: contact_phone,
+                        name: clienteNombre !== 'Cliente Nuevo' ? clienteNombre : undefined,
+                        email: customerEmail || clienteEmail || undefined,
+                        city: customerCity || clienteCity || undefined,
+                        country: 'ar'
+                    },
+                    metadata: { 
+                        source: 'semi_auto_ai', 
+                        messageId,
+                        conversationId,
+                        needsManualReview: needsManualReview || false
+                    }
+                });
+                console.log("✅ Venta enviada a la cola de CAPI");
+            } else {
+                console.log("⚠️ Evento CAPI ya existía para este mensaje");
+            }
+        } else {
+            console.log("ℹ️ Sin marketing_fbcid, no se creó evento CAPI");
+        }
     } catch (capiError) {
         console.error("⚠️ Error enviando a cola CAPI:", capiError);
     }
